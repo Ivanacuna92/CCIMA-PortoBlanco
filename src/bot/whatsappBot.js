@@ -4,8 +4,15 @@ const {
   useMultiFileAuthState,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
-  makeInMemoryStore,
 } = require("baileys");
+
+// makeInMemoryStore is optional in some Baileys versions
+let makeInMemoryStore;
+try {
+  makeInMemoryStore = require("baileys").makeInMemoryStore;
+} catch (e) {
+  console.log("makeInMemoryStore not available in this Baileys version");
+}
 const qrcode = require("qrcode-terminal");
 const pino = require("pino");
 const config = require("../config/config");
@@ -53,10 +60,15 @@ class WhatsAppBot {
         )} (última: ${isLatest})`
       );
 
-      // Crear store en memoria para manejar mensajes
-      this.store = makeInMemoryStore({
-        logger: pino({ level: "silent" }),
-      });
+      // Crear store en memoria para manejar mensajes (si está disponible)
+      if (makeInMemoryStore) {
+        this.store = makeInMemoryStore({
+          logger: pino({ level: "silent" }),
+        });
+      } else {
+        console.log("Continuando sin makeInMemoryStore");
+        this.store = null;
+      }
 
       // Crear socket de WhatsApp con configuración mejorada para producción
       this.sock = makeWASocket({
@@ -169,21 +181,9 @@ class WhatsAppBot {
           sessionManager.startCleanupTimer(this.sock, followUpManager);
         }
       });
-    } catch (error) {
-      console.error("Error iniciando bot:", error);
-      this.isReconnecting = false;
 
-      if (this.reconnectAttempts < this.maxReconnectAttempts) {
-        this.reconnectAttempts++;
-        console.log(
-          `Reintentando en 5 segundos... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`
-        );
-        setTimeout(() => this.start(), 5000);
-      }
-    }
-
-    // Manejar mensajes entrantes
-    this.sock.ev.on("messages.upsert", async (m) => {
+      // Manejar mensajes entrantes
+      this.sock.ev.on("messages.upsert", async (m) => {
       try {
         const msg = m.messages[0];
         if (!msg.message) return;
@@ -329,6 +329,18 @@ class WhatsAppBot {
         await this.handleError(error, m.messages[0]);
       }
     });
+    } catch (error) {
+      console.error("Error iniciando bot:", error);
+      this.isReconnecting = false;
+
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        this.reconnectAttempts++;
+        console.log(
+          `Reintentando en 5 segundos... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`
+        );
+        setTimeout(() => this.start(), 5000);
+      }
+    }
   }
 
   async processMessage(userId, userMessage, chatId) {

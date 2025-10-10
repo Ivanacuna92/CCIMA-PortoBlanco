@@ -1,11 +1,10 @@
 import React from 'react';
-import logo from '../assets/logo.svg';
 
 function Header({ currentView, onViewChange, user, onLogout }) {
   return (
     <header className="bg-white border-b border-gray-200 px-8 py-4">
       <div className="flex justify-between items-center">
-        <img src={logo} alt="Navetec" className="h-10" />
+        <img src="/logoportoblanco.png" alt="Porto Blanco" className="h-10" />
         <nav className="flex gap-1">
           {user?.role === 'admin' && (
             <button 
