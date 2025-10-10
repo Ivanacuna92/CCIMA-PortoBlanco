@@ -264,7 +264,7 @@ class WebServer {
                 <body>
                     <div class="container">
                         <div class="header">
-                            <h1>PortoBlanco WhatsApp</h1>
+                            <h1>PorttoBlanco WhatsApp</h1>
                             <p class="subtitle">Escanea el código QR para conectar</p>
                         </div>
                         
