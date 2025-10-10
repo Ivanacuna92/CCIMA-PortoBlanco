@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Upload, File, CheckCircle, XCircle, Trash2, Download } from 'lucide-react';
 import * as api from '../services/api';
 
-function NavesUpload() {
+function TerrenosUpload() {
   const [uploading, setUploading] = useState(false);
   const [currentFile, setCurrentFile] = useState(null);
   const [dragActive, setDragActive] = useState(false);
@@ -37,7 +37,7 @@ function NavesUpload() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    
+
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFile(e.dataTransfer.files[0]);
     }
@@ -63,24 +63,24 @@ function NavesUpload() {
 
     try {
       const response = await api.uploadCSV(formData);
-      setUploadStatus({ 
-        type: 'success', 
-        message: `Archivo cargado exitosamente. ${response.rowsProcessed} registros procesados. El archivo anterior fue reemplazado.` 
+      setUploadStatus({
+        type: 'success',
+        message: `Archivo cargado exitosamente. ${response.rowsProcessed} registros procesados. El archivo anterior fue reemplazado.`
       });
       fetchCurrentFile();
     } catch (error) {
       console.error('Error completo:', error);
       // Intentar obtener el mensaje de error del servidor
       let errorMessage = 'Error al cargar el archivo';
-      
+
       if (error.response?.data?.error) {
         errorMessage = error.response.data.error;
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
-      setUploadStatus({ 
-        type: 'error', 
+
+      setUploadStatus({
+        type: 'error',
         message: errorMessage
       });
     } finally {
@@ -93,24 +93,24 @@ function NavesUpload() {
 
     try {
       await api.deleteCSV(filename);
-      setUploadStatus({ 
-        type: 'success', 
-        message: `Archivo ${filename} eliminado exitosamente` 
+      setUploadStatus({
+        type: 'success',
+        message: `Archivo ${filename} eliminado exitosamente`
       });
       fetchCurrentFile();
     } catch (error) {
-      setUploadStatus({ 
-        type: 'error', 
-        message: 'Error al eliminar el archivo' 
+      setUploadStatus({
+        type: 'error',
+        message: 'Error al eliminar el archivo'
       });
     }
   };
 
   return (
     <div className="p-6 bg-white rounded-lg shadow">
-      <h2 className="text-2xl font-bold mb-6 text-gray-800">Gestión de Datos de Naves</h2>
-      
-      <div 
+      <h2 className="text-2xl font-bold mb-6 text-gray-800">Gestión de Datos de Terrenos</h2>
+
+      <div
         className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
           dragActive ? 'border-navetec-primary bg-blue-50' : 'border-gray-300'
         } ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -120,14 +120,14 @@ function NavesUpload() {
         onDrop={handleDrop}
       >
         <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-        
+
         <p className="text-lg mb-2">
           Arrastra y suelta tu archivo CSV aquí
         </p>
         <p className="text-sm text-gray-500 mb-4">
           o
         </p>
-        
+
         <label className="inline-block">
           <input
             type="file"
@@ -140,15 +140,15 @@ function NavesUpload() {
             Seleccionar archivo CSV
           </span>
         </label>
-        
+
         <p className="text-xs text-gray-500 mt-4">
-          Formato requerido: Parque Industrial, Ubicación, Tipo, Ancho, Largo, Area (m2), Precio, Estado, Información Extra, Ventajas Estratégicas
+          Formato requerido: Nombre, Ubicación Estratégica, Precios, Metrajes, Plusvalia
         </p>
-        
+
         <div className="mt-4">
           <a
             href="/api/csv/template"
-            download="plantilla_naves.csv"
+            download="plantilla_terrenos.csv"
             className="inline-flex items-center px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
           >
             <Download className="h-4 w-4 mr-2" />
@@ -162,8 +162,8 @@ function NavesUpload() {
           uploadStatus.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
         }`}>
           <div className="flex items-start">
-            {uploadStatus.type === 'success' ? 
-              <CheckCircle className="h-5 w-5 mr-2 flex-shrink-0 mt-0.5" /> : 
+            {uploadStatus.type === 'success' ?
+              <CheckCircle className="h-5 w-5 mr-2 flex-shrink-0 mt-0.5" /> :
               <XCircle className="h-5 w-5 mr-2 flex-shrink-0 mt-0.5" />
             }
             <div className="flex-1">
@@ -182,7 +182,7 @@ function NavesUpload() {
 
       <div className="mt-8">
         <h3 className="text-lg font-semibold mb-4">Archivo CSV Actual</h3>
-        
+
         {!currentFile ? (
           <p className="text-gray-500">No hay archivo cargado aún</p>
         ) : (
@@ -215,4 +215,4 @@ function NavesUpload() {
   );
 }
 
-export default NavesUpload;
+export default TerrenosUpload;

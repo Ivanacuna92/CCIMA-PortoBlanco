@@ -184,7 +184,7 @@ class FollowUpManager {
             // Crear prompt para generar mensaje de seguimiento
             const systemPrompt = {
                 role: 'system',
-                content: `Eres Daniel de Navetec. El cliente dejó de responder hace 24 horas.
+                content: `Eres Daniel de Porto Blanco. El cliente dejó de responder hace 24 horas.
 
 Esta es la conversación #${followUpCount + 1} de seguimiento.
 
@@ -214,8 +214,8 @@ Genera SOLO el mensaje de seguimiento, sin explicaciones adicionales.`
 
             // Fallback a mensajes predefinidos
             const fallbackMessages = [
-                'Hola, quería darle seguimiento a nuestra conversación anterior. ¿Aún está interesado en conocer más sobre nuestras naves industriales? ¿Tiene alguna duda que pueda resolver?',
-                'Hola nuevamente. Veo que no hemos continuado con la conversación. ¿Le gustaría conocer otras opciones disponibles o recibir información adicional sobre algún parque industrial específico?',
+                'Hola, quería darle seguimiento a nuestra conversación anterior. ¿Aún está interesado en conocer más sobre nuestros terrenos de inversión? ¿Tiene alguna duda que pueda resolver?',
+                'Hola nuevamente. Veo que no hemos continuado con la conversación. ¿Le gustaría conocer otras opciones disponibles o recibir información adicional sobre ubicaciones y metrajes disponibles?',
                 'Hola, este será mi último mensaje de seguimiento. Si desea información adicional, puede contactar directamente a Paola González al 4424634736 o al correo paola.gonzalez@grupoccima.com.mx. Estamos a su disposición.'
             ];
 

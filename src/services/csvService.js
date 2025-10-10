@@ -4,21 +4,16 @@ const csv = require('csv-parse/sync');
 
 class CSVService {
   constructor() {
-    this.dataDir = path.join(process.cwd(), 'data', 'naves');
+    this.dataDir = path.join(process.cwd(), 'data', 'terrenos');
     this.ensureDataDir();
 
     // Campos obligatorios que DEBE tener el CSV
     this.requiredFields = [
-      'Parque Industrial',
-      'Ubicación',
-      'Tipo',
-      'Ancho',
-      'Largo',
-      'Area (m2)',
-      'Precio',
-      'Estado',
-      'Información Extra',
-      'Ventajas Estratégicas'
+      'Nombre',
+      'Ubicación Estratégica',
+      'Precios',
+      'Metrajes',
+      'Plusvalia'
     ];
   }
 
@@ -67,19 +62,12 @@ class CSVService {
 
       // Validar que cada registro tenga datos válidos
       records.forEach((record, index) => {
-        // Verificar que los campos numéricos sean válidos
-        if (record['Ancho'] && isNaN(parseFloat(record['Ancho']))) {
-          throw new Error(`Fila ${index + 2}: El campo 'Ancho' debe ser un número`);
-        }
-        if (record['Largo'] && isNaN(parseFloat(record['Largo']))) {
-          throw new Error(`Fila ${index + 2}: El campo 'Largo' debe ser un número`);
-        }
-        if (record['Area (m2)'] && isNaN(parseFloat(record['Area (m2)']))) {
-          throw new Error(`Fila ${index + 2}: El campo 'Area (m2)' debe ser un número`);
-        }
-        if (record['Precio'] && isNaN(parseFloat(record['Precio']))) {
-          throw new Error(`Fila ${index + 2}: El campo 'Precio' debe ser un número`);
-        }
+        // Verificar que los campos obligatorios no estén vacíos
+        this.requiredFields.forEach(field => {
+          if (!record[field] || record[field].trim() === '') {
+            throw new Error(`Fila ${index + 2}: El campo '${field}' no puede estar vacío`);
+          }
+        });
       });
 
       // ELIMINAR TODOS LOS ARCHIVOS CSV EXISTENTES
@@ -93,7 +81,7 @@ class CSVService {
 
       // Guardar el nuevo archivo con timestamp para evitar duplicados
       const timestamp = new Date().toISOString().split('T')[0];
-      const newFilename = `naves_${timestamp}.csv`;
+      const newFilename = `terrenos_${timestamp}.csv`;
       const filePath = path.join(this.dataDir, newFilename);
       await fs.writeFile(filePath, content);
 
@@ -152,16 +140,6 @@ class CSVService {
           return String(value).toLowerCase().includes(normalizedQuery);
         });
       });
-
-      // Si hay resultados exactos por parque industrial, priorizar esos
-      const exactMatches = results.filter(r =>
-        r['Parque Industrial'] &&
-        r['Parque Industrial'].toLowerCase() === normalizedQuery
-      );
-
-      if (exactMatches.length > 0) {
-        return exactMatches;
-      }
 
       return results;
     } catch (error) {
@@ -239,48 +217,24 @@ class CSVService {
   formatRecordForDisplay(record) {
     let formatted = [];
 
-    if (record['Parque Industrial']) {
-      formatted.push(`📍 Parque Industrial: ${record['Parque Industrial']}`);
+    if (record['Nombre']) {
+      formatted.push(`*${record['Nombre']}*\n`);
     }
-    if (record['Ubicación']) {
-      formatted.push(`📌 Ubicación: ${record['Ubicación']}`);
-    }
-    if (record['Tipo']) {
-      formatted.push(`🏭 Tipo: ${record['Tipo']}`);
-    }
-    if (record['Area (m2)']) {
-      formatted.push(`📐 Área: ${record['Area (m2)']} m²`);
-    }
-    if (record['Ancho'] && record['Largo']) {
-      formatted.push(`📏 Dimensiones: ${record['Ancho']}m x ${record['Largo']}m`);
-    }
-    if (record['Precio']) {
-      // Preservar el precio exacto del CSV sin redondeo
-      const precioString = String(record['Precio']).replace(/,/g, '');
-      const precio = parseFloat(precioString);
 
-      // Determinar si el precio tiene decimales
-      const tieneDecimales = precioString.includes('.');
-      const decimales = tieneDecimales ? (precioString.split('.')[1] || '').length : 0;
+    if (record['Ubicación Estratégica']) {
+      formatted.push(`*Ubicación Estratégica*\n${record['Ubicación Estratégica']}`);
+    }
 
-      const precioFormateado = precio.toLocaleString('es-MX', {
-        style: 'currency',
-        currency: 'MXN',
-        minimumFractionDigits: decimales,
-        maximumFractionDigits: decimales
-      });
-      formatted.push(`💰 Precio: ${precioFormateado}`);
+    if (record['Precios']) {
+      formatted.push(`\n*Precios*\n${record['Precios']}`);
     }
-    if (record['Estado']) {
-      const emoji = record['Estado'].toLowerCase() === 'disponible' ? '✅' :
-        record['Estado'].toLowerCase() === 'sold out' ? '❌' : '⏳';
-      formatted.push(`${emoji} Estado: ${record['Estado']}`);
+
+    if (record['Metrajes']) {
+      formatted.push(`\n*Metrajes*\n${record['Metrajes']}`);
     }
-    if (record['Información Extra']) {
-      formatted.push(`ℹ️ Info adicional: ${record['Información Extra']}`);
-    }
-    if (record['Ventajas Estratégicas']) {
-      formatted.push(`🎯 Ventajas estratégicas: ${record['Ventajas Estratégicas']}`);
+
+    if (record['Plusvalia']) {
+      formatted.push(`\n*Plusvalía*\n${record['Plusvalia']}`);
     }
 
     return formatted.join('\n');

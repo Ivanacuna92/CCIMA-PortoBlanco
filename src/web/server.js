@@ -981,14 +981,15 @@ class WebServer {
     // Descargar plantilla CSV
     this.app.get("/api/csv/template", (req, res) => {
       try {
-        const templateContent = `Parque Industrial,Ubicación,Tipo,Ancho,Largo,Area (m2),Precio,Estado,Información Extra,Ventajas Estratégicas
-Vernes,Carr. México - Qro,Nave Industrial,50,30,1500,750000,Disponible,Incluye oficinas administrativas,Acceso directo a autopistas principales
-LuisOnorio,Av. Constituyentes,Micronave,25,20,500,350000,Pre-Venta,Cuenta con muelle de carga,Zona de alto flujo comercial`;
+        const templateContent = `Nombre,Ubicación Estratégica,Precios,Metrajes,Plusvalia
+PORTTO BLANCO BERNAL,"A solo 5 minutos de la Peña de Bernal, uno de los destinos turísticos más visitados de México.
+35 minutos de Querétaro capital y 2 horas de la CDMX, con excelente conectividad carretera.
+Rodeado de corredores gastronómicos, rutas de vino y áreas de expansión turística.","Precios desde: $623,280",Metrajes disponibles: 140 m2 hasta 300 m2,Plusvalía proyectada: 10% anual`;
 
         res.setHeader("Content-Type", "text/csv");
         res.setHeader(
           "Content-Disposition",
-          'attachment; filename="plantilla_naves.csv"'
+          'attachment; filename="plantilla_terrenos.csv"'
         );
         res.send(templateContent);
       } catch (error) {
