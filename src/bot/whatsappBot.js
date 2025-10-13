@@ -184,151 +184,158 @@ class WhatsAppBot {
 
       // Manejar mensajes entrantes
       this.sock.ev.on("messages.upsert", async (m) => {
-      try {
-        const msg = m.messages[0];
-        if (!msg.message) return;
+        try {
+          const msg = m.messages[0];
+          if (!msg.message) return;
 
-        // Log para debugging
-        console.log(
-          "Mensaje recibido - fromMe:",
-          msg.key.fromMe,
-          "remoteJid:",
-          msg.key.remoteJid
-        );
-
-        // Ignorar mensajes propios
-        if (msg.key.fromMe) {
-          console.log("Ignorando mensaje propio");
-          return;
-        }
-
-        // Obtener el número del remitente
-        const from = msg.key.remoteJid;
-        const isGroup = from.endsWith("@g.us");
-
-        // Solo responder a mensajes privados
-        if (isGroup) return;
-
-        // Obtener el texto del mensaje
-        const conversation =
-          msg.message.conversation ||
-          msg.message.extendedTextMessage?.text ||
-          "";
-
-        // Ignorar mensajes sin texto
-        if (!conversation || conversation.trim() === "") {
-          console.log("Mensaje ignorado - Sin contenido de texto");
-          return;
-        }
-
-        // Extraer información del usuario
-        const userId = from.replace("@s.whatsapp.net", "");
-        const userName = msg.pushName || userId;
-
-        // Implementar un sistema de debounce para evitar procesamiento duplicado
-        if (!this.messageProcessingQueue) {
-          this.messageProcessingQueue = new Map();
-        }
-
-        // Crear clave única para el mensaje
-        const messageKey = `${userId}_${conversation}_${Date.now()}`;
-
-        // Verificar si ya estamos procesando un mensaje similar
-        const recentKey = Array.from(this.messageProcessingQueue.keys()).find(
-          (key) => {
-            const [id, content] = key.split("_");
-            return id === userId && content === conversation;
-          }
-        );
-
-        if (
-          recentKey &&
-          Date.now() - this.messageProcessingQueue.get(recentKey) < 2000
-        ) {
-          console.log(`Mensaje duplicado ignorado de ${userId}`);
-          return;
-        }
-
-        // Marcar mensaje como en procesamiento
-        this.messageProcessingQueue.set(messageKey, Date.now());
-
-        // Limpiar mensajes antiguos del queue
-        for (const [key, timestamp] of this.messageProcessingQueue.entries()) {
-          if (Date.now() - timestamp > 5000) {
-            this.messageProcessingQueue.delete(key);
-          }
-        }
-
-        await logger.log("cliente", conversation, userId, userName);
-
-        // Verificar si está en modo humano o soporte
-        const isHuman = await humanModeManager.isHumanMode(userId);
-        const isSupport = await humanModeManager.isSupportMode(userId);
-
-        if (isHuman || isSupport) {
-          const mode = isSupport ? "SOPORTE" : "HUMANO";
-          await logger.log(
-            "SYSTEM",
-            `Mensaje ignorado - Modo ${mode} activo para ${userName} (${userId})`
+          // Log para debugging
+          console.log(
+            "Mensaje recibido - fromMe:",
+            msg.key.fromMe,
+            "remoteJid:",
+            msg.key.remoteJid
           );
+
+          // Ignorar mensajes propios
+          if (msg.key.fromMe) {
+            console.log("Ignorando mensaje propio");
+            return;
+          }
+
+          // Obtener el número del remitente
+          const from = msg.key.remoteJid;
+          const isGroup = from.endsWith("@g.us");
+
+          // Solo responder a mensajes privados
+          if (isGroup) return;
+
+          // Obtener el texto del mensaje
+          const conversation =
+            msg.message.conversation ||
+            msg.message.extendedTextMessage?.text ||
+            "";
+
+          // Ignorar mensajes sin texto
+          if (!conversation || conversation.trim() === "") {
+            console.log("Mensaje ignorado - Sin contenido de texto");
+            return;
+          }
+
+          // Extraer información del usuario
+          const userId = from.replace("@s.whatsapp.net", "");
+          const userName = msg.pushName || userId;
+
+          // Implementar un sistema de debounce para evitar procesamiento duplicado
+          if (!this.messageProcessingQueue) {
+            this.messageProcessingQueue = new Map();
+          }
+
+          // Crear clave única para el mensaje
+          const messageKey = `${userId}_${conversation}_${Date.now()}`;
+
+          // Verificar si ya estamos procesando un mensaje similar
+          const recentKey = Array.from(this.messageProcessingQueue.keys()).find(
+            (key) => {
+              const [id, content] = key.split("_");
+              return id === userId && content === conversation;
+            }
+          );
+
+          if (
+            recentKey &&
+            Date.now() - this.messageProcessingQueue.get(recentKey) < 2000
+          ) {
+            console.log(`Mensaje duplicado ignorado de ${userId}`);
+            return;
+          }
+
+          // Marcar mensaje como en procesamiento
+          this.messageProcessingQueue.set(messageKey, Date.now());
+
+          // Limpiar mensajes antiguos del queue
+          for (const [
+            key,
+            timestamp,
+          ] of this.messageProcessingQueue.entries()) {
+            if (Date.now() - timestamp > 5000) {
+              this.messageProcessingQueue.delete(key);
+            }
+          }
+
+          await logger.log("cliente", conversation, userId, userName);
+
+          // Verificar si está en modo humano o soporte
+          const isHuman = await humanModeManager.isHumanMode(userId);
+          const isSupport = await humanModeManager.isSupportMode(userId);
+
+          if (isHuman || isSupport) {
+            const mode = isSupport ? "SOPORTE" : "HUMANO";
+            await logger.log(
+              "SYSTEM",
+              `Mensaje ignorado - Modo ${mode} activo para ${userName} (${userId})`
+            );
+            this.messageProcessingQueue.delete(messageKey);
+
+            // Detener seguimiento si está activo (ya está en conversación activa)
+            if (await followUpManager.isFollowUpActive(userId)) {
+              await followUpManager.stopFollowUp(userId, "modo_humano_activo");
+            }
+
+            return;
+          }
+
+          // Procesar mensaje y generar respuesta
+          const response = await this.processMessage(
+            userId,
+            conversation,
+            from
+          );
+
+          // Enviar respuesta solo si tenemos una respuesta válida
+          if (response && response.trim() !== "") {
+            await this.sock.sendMessage(from, { text: response });
+            await logger.log("bot", response, userId, userName);
+          }
+
+          // Analizar estado de la conversación después de la respuesta
+          const conversationHistory = await sessionManager.getMessages(
+            userId,
+            from
+          );
+          const status = await aiService.analyzeConversationStatus(
+            conversationHistory,
+            conversation
+          );
+
+          console.log(
+            `[FollowUp] Estado de conversación para ${userId}: ${status}`
+          );
+
+          // Manejar seguimientos basados en el estado
+          if (
+            status === "ACEPTADO" ||
+            status === "RECHAZADO" ||
+            status === "FRUSTRADO"
+          ) {
+            // Detener seguimiento si existe
+            if (await followUpManager.isFollowUpActive(userId)) {
+              await followUpManager.stopFollowUp(userId, status.toLowerCase());
+            }
+          } else if (status === "ACTIVO") {
+            // Cliente respondió - detener seguimiento si existe
+            if (await followUpManager.isFollowUpActive(userId)) {
+              await followUpManager.stopFollowUp(userId, "volvio_activo");
+            }
+            // NO iniciar seguimiento aquí - se iniciará automáticamente a los 5 minutos por sessionManager
+          }
+          // NO manejamos INACTIVO aquí - el sessionManager lo hace a los 5 minutos
+
+          // Eliminar del queue después de procesar
           this.messageProcessingQueue.delete(messageKey);
-
-          // Detener seguimiento si está activo (ya está en conversación activa)
-          if (await followUpManager.isFollowUpActive(userId)) {
-            await followUpManager.stopFollowUp(userId, "modo_humano_activo");
-          }
-
-          return;
+        } catch (error) {
+          await this.handleError(error, m.messages[0]);
         }
-
-        // Procesar mensaje y generar respuesta
-        const response = await this.processMessage(userId, conversation, from);
-
-        // Enviar respuesta solo si tenemos una respuesta válida
-        if (response && response.trim() !== "") {
-          await this.sock.sendMessage(from, { text: response });
-          await logger.log("bot", response, userId, userName);
-        }
-
-        // Analizar estado de la conversación después de la respuesta
-        const conversationHistory = await sessionManager.getMessages(
-          userId,
-          from
-        );
-        const status = await aiService.analyzeConversationStatus(
-          conversationHistory,
-          conversation
-        );
-
-        console.log(
-          `[FollowUp] Estado de conversación para ${userId}: ${status}`
-        );
-
-        // Manejar seguimientos basados en el estado
-        if (
-          status === "ACEPTADO" ||
-          status === "RECHAZADO" ||
-          status === "FRUSTRADO"
-        ) {
-          // Detener seguimiento si existe
-          if (await followUpManager.isFollowUpActive(userId)) {
-            await followUpManager.stopFollowUp(userId, status.toLowerCase());
-          }
-        } else if (status === "ACTIVO") {
-          // Cliente respondió - detener seguimiento si existe
-          if (await followUpManager.isFollowUpActive(userId)) {
-            await followUpManager.stopFollowUp(userId, "volvio_activo");
-          }
-          // NO iniciar seguimiento aquí - se iniciará automáticamente a los 5 minutos por sessionManager
-        }
-        // NO manejamos INACTIVO aquí - el sessionManager lo hace a los 5 minutos
-
-        // Eliminar del queue después de procesar
-        this.messageProcessingQueue.delete(messageKey);
-      } catch (error) {
-        await this.handleError(error, m.messages[0]);
-      }
-    });
+      });
     } catch (error) {
       console.error("Error iniciando bot:", error);
       this.isReconnecting = false;
@@ -359,7 +366,7 @@ class WhatsAppBot {
       await sessionManager.addMessage(userId, "user", userMessage, chatId);
 
       // Dar bienvenida y pedir nombre de forma educada
-      const welcomeMessage = `¡Hola! Soy Daniel, asistente virtual de Navetec.\n\n¿Con quién tengo el gusto?\n\n_Por favor, proporciona tu nombre completo`;
+      const welcomeMessage = `¡Hola! Soy Daniel, asistente virtual de Portto Blanco.\n\n¿Con quién tengo el gusto?\n\n_Por favor, proporciona tu nombre completo`;
       await sessionManager.addMessage(
         userId,
         "assistant",
