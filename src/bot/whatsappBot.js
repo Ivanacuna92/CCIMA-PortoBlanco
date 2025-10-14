@@ -382,6 +382,20 @@ class WhatsAppBot {
 
     // Detectar email
     if (emailRegex.test(trimmedMessage.toLowerCase())) {
+      // Verificar si hay una activación de soporte pendiente (cita agendada)
+      const hasPending = await userDataManager.hasPendingSupportActivation(userId);
+      console.log(`[DEBUG-EMAIL] Usuario ${userId} - hasPendingSupportActivation: ${hasPending}`);
+
+      if (hasPending) {
+        console.log(`[DEBUG-EMAIL] Redirigiendo a handleEmailCollection para ${userId}`);
+        // Agregar mensaje del usuario a la sesión ANTES de manejar el email
+        await sessionManager.addMessage(userId, "user", userMessage, chatId);
+        // Redirigir al manejador de email para soporte (que mostrará directamente la cita y asesor)
+        return await this.handleEmailCollection(userId, userMessage, chatId);
+      }
+
+      // Si no hay soporte pendiente, procesar email normalmente (SIN confirmación del correo)
+      console.log(`[DEBUG-EMAIL] Procesando email normalmente para ${userId}`);
       const email = trimmedMessage.toLowerCase();
       await userDataManager.setUserData(userId, { email: email });
       const userData = await userDataManager.getUserData(userId);
@@ -490,9 +504,28 @@ class WhatsAppBot {
 
     // Generar respuesta con IA
     const aiResponse = await aiService.generateResponse(messages);
+    console.log(`[DEBUG-AI] Respuesta de IA para ${userId}: ${aiResponse.substring(0, 200)}...`);
+
+    // Verificar si la respuesta contiene el marcador de solicitar email para cita
+    if (aiResponse.includes("{{SOLICITAR_EMAIL_PARA_CITA}}")) {
+      console.log(`[DEBUG-AI] Marcador {{SOLICITAR_EMAIL_PARA_CITA}} detectado para ${userId}`);
+
+      // Activar flag de pending support activation
+      await userDataManager.setPendingSupportActivation(userId, true);
+      console.log(`[DEBUG-SUPPORT] Flag pendingSupportActivation establecido para ${userId}`);
+
+      // Remover el marcador de la respuesta antes de enviar
+      const cleanResponse = aiResponse.replace("{{SOLICITAR_EMAIL_PARA_CITA}}", "").trim();
+
+      // Agregar respuesta limpia a la sesión
+      await sessionManager.addMessage(userId, "assistant", cleanResponse, chatId);
+
+      return cleanResponse;
+    }
 
     // Verificar si la respuesta contiene el marcador de activar soporte
     if (aiResponse.includes("{{ACTIVAR_SOPORTE}}")) {
+      console.log(`[DEBUG-AI] Marcador {{ACTIVAR_SOPORTE}} detectado para ${userId}`);
       // Primero verificar si tenemos el email del usuario
       const userData = await userDataManager.getUserData(userId);
       if (!userData || !userData.email) {
@@ -512,6 +545,7 @@ class WhatsAppBot {
         }
 
         await userDataManager.setPendingSupportActivation(userId, true);
+        console.log(`[DEBUG-SUPPORT] Flag pendingSupportActivation establecido para ${userId}`);
 
         const emailRequest = `Para poder asignarte un asesor especializado y mantener un seguimiento de tu caso, necesito tu correo electrónico.\n\n📧 Por favor, proporciona tu correo electrónico:`;
         return emailRequest;
@@ -649,7 +683,10 @@ class WhatsAppBot {
     const userData = await userDataManager.getUserData(userId);
 
     // Verificar si había una activación de soporte pendiente
-    if (await userDataManager.hasPendingSupportActivation(userId)) {
+    const hasPendingSupport = await userDataManager.hasPendingSupportActivation(userId);
+    console.log(`[DEBUG] hasPendingSupportActivation para ${userId}: ${hasPendingSupport}`);
+
+    if (hasPendingSupport) {
       // Limpiar el flag de soporte pendiente
       await userDataManager.setPendingSupportActivation(userId, false);
 
@@ -677,13 +714,16 @@ class WhatsAppBot {
         console.error("[Bot] Error analizando conversación:", error);
       }
 
-      // Preparar respuesta con información del asesor
-      let response = `¡Perfecto ${userData.name}! ✅\n\nHe registrado tu correo: ${email}\n\nTe estoy transfiriendo con uno de nuestros asesores especializados que te ayudará con tu caso.`;
+      // Preparar respuesta directamente con información del asesor (sin mensaje intermedio)
+      let response = `📋 *Tu cita ha sido registrada*\n\n`;
 
       if (asesorAsignado) {
         response +=
-          `\n\n📋 *Asesor asignado:* ${asesorAsignado.nombre}\n` +
-          `_Especialidad: ${asesorAsignado.especialidades.join(", ")}_`;
+          `*Asesor asignado:* ${asesorAsignado.nombre}\n` +
+          `_Especialidad: ${asesorAsignado.especialidades.join(", ")}_\n\n` +
+          `En breve ${asesorAsignado.nombre} tomará el control de esta conversación para ayudarte.`;
+      } else {
+        response += `Uno de nuestros asesores especializados tomará el control de esta conversación en breve.`;
       }
 
       // Registrar en logs
