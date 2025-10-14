@@ -1,40 +1,40 @@
 {
   "perfiles_de_asesores": [
     {
-      "id": "asesor_001",
-      "nombre": "Percy Babb",
+      "id": "asesor_003",
+      "nombre": "Noemí Ronquillo",
       "especialidades": [
-        "relaciones con inversionistas",
-        "información técnica",
-        "ambiente industrial",
-        "potencial de desarrollo"
+        "conexión emocional",
+        "calidad de vida",
+        "vida en comunidad",
+        "relación personal con el cliente"
       ],
       "palabras_clave": [
-        "ubicación", "localización", "vecinos", "empresas",
-        "industrial", "desarrollo", "equipamiento"
+        "amenidades", "seguridad", "familia", "hogar",
+        "comunidad", "áreas verdes", "ambiente", "vida"
       ],
-      "descripcion": "Asesor conversacional que mantiene un tono formal pero enfocado en construir relaciones sólidas. Transmite que invertir en Navetec es entrar a un círculo de crecimiento y respaldo. Ideal para leads que preguntan sobre la ubicación, información técnica, empresas vecinas o el potencial de desarrollo de la zona."
+      "descripcion": "Asesora conversacional que conecta desde lo emocional. Su estilo es cálido, cercano y empático; entiende los sueños y aspiraciones de cada lead más allá de los números. Ideal para quienes preguntan sobre amenidades, vida en comunidad, seguridad o calidad de vida. Noemí convierte la conversación en una experiencia humana que genera confianza y motivación al ayudar a los clientes a imaginar su futuro hogar dentro del proyecto."
     },
     {
-      "id": "asesor_002",
-      "nombre": "David Villagarcía",
+      "id": "asesor_004",
+      "nombre": "Blanca Pichardo",
       "especialidades": [
         "análisis financiero",
-        "proyecciones",
+        "planes de financiamiento",
         "rendimiento de inversión",
-        "datos duros"
+        "claridad en costos"
       ],
       "palabras_clave": [
-        "precio", "costo", "inversión", "rendimiento",
-        "rentabilidad", "ganancia", "plusvalía"
+        "mensualidades", "financiamiento", "plusvalía",
+        "enganche", "rendimiento", "inversión", "costos", "proyecciones"
       ],
-      "descripcion": "Perfil financiero que comunica de forma técnica, estructurada y precisa. Enfocado en dar respuestas rápidas y claras sobre el rendimiento de la inversión. Su rol es atender a inversionistas que buscan datos duros, comparativas y proyecciones para tomar decisiones calculadas."
+      "descripcion": "Perfil orientado a los datos, con una comunicación clara, directa y racional. Blanca transmite seguridad al explicar temas financieros como mensualidades, planes de financiamiento, plusvalía, enganches o rendimientos. Ideal para leads que buscan cifras precisas, proyecciones de inversión y certeza económica. Su enfoque convierte el terreno en una oportunidad tangible de inversión rentable y con respaldo financiero."
     }
   ],
   "configuracion": {
     "asignacion_automatica": true,
     "umbral_confianza": 0.6,
     "analisis_profundidad": 3,
-    "asesor_por_defecto": "asesor_001"
+    "asesor_por_defecto": "asesor_003"
   }
 }
