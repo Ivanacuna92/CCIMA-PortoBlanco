@@ -54,6 +54,8 @@ class UserDataManager {
             dataCollected: data.dataCollected !== undefined ? data.dataCollected : existingData.dataCollected,
             nameCollected: data.nameCollected !== undefined ? data.nameCollected : existingData.nameCollected,
             pendingSupportActivation: data.pendingSupportActivation !== undefined ? data.pendingSupportActivation : existingData.pendingSupportActivation,
+            waitingForNameAfterInterest: data.waitingForNameAfterInterest !== undefined ? data.waitingForNameAfterInterest : existingData.waitingForNameAfterInterest,
+            waitingForName: data.waitingForName !== undefined ? data.waitingForName : existingData.waitingForName,
             createdAt: existingData.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
@@ -102,6 +104,14 @@ class UserDataManager {
         if (!userData) {
             return 'none'; // No hay datos
         }
+        // Si está esperando nombre explícitamente
+        if (userData.waitingForName) {
+            return 'waiting_name';
+        }
+        // Si está esperando nombre después de mostrar interés
+        if (userData.waitingForNameAfterInterest) {
+            return 'waiting_name_after_interest';
+        }
         // Si tiene flag de soporte pendiente y no tiene email
         if (userData.pendingSupportActivation && !userData.email) {
             return 'email_pending_for_support';
@@ -129,6 +139,28 @@ class UserDataManager {
     async hasPendingSupportActivation(userId) {
         const userData = this.cache.get(userId);
         return userData && userData.pendingSupportActivation === true;
+    }
+
+    async setWaitingForNameAfterInterest(userId, value) {
+        return await this.setUserData(userId, { waitingForNameAfterInterest: value });
+    }
+
+    async setWaitingForName(userId, value) {
+        return await this.setUserData(userId, { waitingForName: value });
+    }
+
+    // Detectar respuestas afirmativas comunes
+    isAffirmativeResponse(message) {
+        const affirmatives = [
+            'si', 'sí', 'claro', 'por favor', 'adelante', 'de acuerdo', 'perfecto',
+            'excelente', 'ok', 'okay', 'va', 'vale', 'dale', 'ándale', 'órale',
+            'simón', 'sip', 'sale', 'jalo', 'venga', 'arre', 'porfa', 'obvio',
+            'por supuesto', 'está bien', 'me parece', 'sí quiero', 'ya', 'ahora',
+            'ahorita', 'de una vez', 'urgente', 'seguro', 'sep', 'seh', 'sipi',
+            'oki', 'okey', 'see', 'simon'
+        ];
+        const normalized = message.toLowerCase().trim();
+        return affirmatives.some(word => normalized === word || normalized.includes(word));
     }
 }
 

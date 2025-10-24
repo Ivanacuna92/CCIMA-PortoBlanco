@@ -1,12 +1,8 @@
 {
   "5217714144641": {
     "userId": "5217714144641",
-    "name": "Ulises Vera",
-    "email": "uwu@gmail.com",
-    "dataCollected": true,
-    "nameCollected": true,
-    "pendingSupportActivation": false,
-    "createdAt": "2025-10-14T16:53:20.109Z",
-    "updatedAt": "2025-10-14T16:55:01.706Z"
+    "waitingForNameAfterInterest": true,
+    "createdAt": "2025-10-24T16:41:46.828Z",
+    "updatedAt": "2025-10-24T16:41:47.172Z"
   }
 }

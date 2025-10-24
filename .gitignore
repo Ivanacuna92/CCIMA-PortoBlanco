@@ -35,6 +35,7 @@ out/
 # Logs
 logs/
 *.log
+primerosMensajes.txt
 
 # Testing
 coverage/

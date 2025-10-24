@@ -352,21 +352,121 @@ class WhatsAppBot {
 
   async processMessage(userId, userMessage, chatId) {
     const dataCollectionState = userDataManager.getDataCollectionState(userId);
+    const trimmedMessage = userMessage.trim();
 
     // Verificar si estamos esperando el email para activar soporte (prioridad alta)
     if (dataCollectionState === "email_pending_for_support") {
       return await this.handleEmailCollection(userId, userMessage, chatId);
     }
 
-    // Si es usuario nuevo, dar bienvenida y pedir nombre (pero no bloquear)
+    // Verificar si está esperando nombre después de confirmar interés
+    if (dataCollectionState === "waiting_name_after_interest") {
+      // Agregar el mensaje del usuario primero
+      await sessionManager.addMessage(userId, "user", userMessage, chatId);
+
+      // Si responde afirmativamente, pedir nombre
+      if (userDataManager.isAffirmativeResponse(userMessage)) {
+        const nameRequestMessage = `Perfecto 🙌🏼
+Antes de enviarte la información, ¿podrías compartirme tu *nombre* para personalizar tu asesoría?`;
+
+        await sessionManager.addMessage(
+          userId,
+          "assistant",
+          nameRequestMessage,
+          chatId
+        );
+
+        // Cambiar el estado para que ahora esté esperando el nombre explícitamente
+        await userDataManager.setWaitingForName(userId, true);
+        await userDataManager.setWaitingForNameAfterInterest(userId, false);
+
+        return nameRequestMessage;
+      } else {
+        // Si no responde afirmativamente, continuar con flujo normal de IA
+        await userDataManager.setWaitingForNameAfterInterest(userId, false);
+        // Continuar procesando con IA más abajo
+      }
+    }
+
+    // Verificar si está esperando nombre explícitamente
+    if (dataCollectionState === "waiting_name") {
+      // Agregar el mensaje del usuario primero
+      await sessionManager.addMessage(userId, "user", userMessage, chatId);
+
+      // Validar que parezca un nombre
+      if (userDataManager.isValidName(trimmedMessage)) {
+        // Capitalizar nombre (primera letra de cada palabra en mayúscula)
+        const capitalizedName = trimmedMessage
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+          .join(' ');
+
+        await userDataManager.setUserData(userId, { name: capitalizedName });
+        await userDataManager.markNameCollected(userId);
+        await userDataManager.setWaitingForName(userId, false);
+
+        const confirmationMessage = `¡Muchas gracias, ${capitalizedName}! 😊\n\n¿En qué puedo ayudarte hoy? Te puedo compartir información sobre:\n\n🏡 Terrenos disponibles y precios\n📍 Ubicación estratégica\n💰 Planes de financiamiento\n📊 Proyección de plusvalía\n\n¿Qué te interesa conocer?`;
+        await sessionManager.addMessage(
+          userId,
+          "assistant",
+          confirmationMessage,
+          chatId
+        );
+        return confirmationMessage;
+      } else {
+        // Si no es un nombre válido, volver a pedir
+        const retryMessage = `Por favor, proporciona un nombre válido:`;
+        await sessionManager.addMessage(
+          userId,
+          "assistant",
+          retryMessage,
+          chatId
+        );
+        return retryMessage;
+      }
+    }
+
+    // Si es usuario nuevo, usar el flujo de primeros mensajes según el documento
     if (dataCollectionState === "none") {
       await userDataManager.setUserData(userId, {});
 
       // Agregar el mensaje del usuario primero
       await sessionManager.addMessage(userId, "user", userMessage, chatId);
 
-      // Dar bienvenida y pedir nombre de forma educada
-      const welcomeMessage = `¡Hola! Soy Daniel, asistente virtual de Portto Blanco.\n\n¿Con quién tengo el gusto?\n\n_Por favor, proporciona tu nombre completo`;
+      // Seleccionar aleatoriamente uno de los 3 flujos de bienvenida
+      const flujoAleatorio = Math.floor(Math.random() * 3) + 1;
+      let welcomeMessage;
+
+      if (flujoAleatorio === 1) {
+        // Flujo 1: Primer contacto general - directo a pedir nombre
+        welcomeMessage = `Hola! ☺️
+Soy Daniel, asistente virtual de *Portto Blanco Terrenos Residenciales*.
+Con gusto puedo compartirte información sobre nuestros desarrollos y opciones de inversión.
+¿Podrías compartirme tu *nombre* para atenderte de forma personalizada?`;
+
+        // Marcar que está esperando nombre
+        await userDataManager.setWaitingForName(userId, true);
+      } else if (flujoAleatorio === 2) {
+        // Flujo 2: Cliente muestra interés directo
+        welcomeMessage = `Hola! ☺️
+Soy Daniel, asistente virtual de *Portto Blanco Terrenos Residenciales*.
+En Portto Blanco ayudamos a nuestros inversionistas a duplicar el valor de su patrimonio en solo 5 años 📈
+
+¿Te gustaría saber cómo puedes lograrlo?`;
+
+        // Marcar que está esperando respuesta afirmativa para luego pedir nombre
+        await userDataManager.setWaitingForNameAfterInterest(userId, true);
+      } else {
+        // Flujo 3: Información sobre ubicaciones y precios
+        welcomeMessage = `¡Hola! ☺️
+Soy Daniel, asistente virtual de Portto Blanco Terrenos Residenciales.
+Puedo ayudarte a conocer nuestras ubicaciones, precios y beneficios exclusivos.
+¿Te gustaría que te comparta más información?`;
+
+        // Marcar que está esperando respuesta afirmativa para luego pedir nombre
+        await userDataManager.setWaitingForNameAfterInterest(userId, true);
+      }
+
       await sessionManager.addMessage(
         userId,
         "assistant",
@@ -378,7 +478,6 @@ class WhatsAppBot {
 
     // Detectar si el usuario está proporcionando un email o nombre directamente
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const trimmedMessage = userMessage.trim();
 
     // Detectar email
     if (emailRegex.test(trimmedMessage.toLowerCase())) {

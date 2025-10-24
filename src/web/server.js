@@ -909,6 +909,49 @@ class WebServer {
       }
     );
 
+    // API endpoint para limpiar caché de un usuario (solo admin o localhost)
+    this.app.post(
+      "/api/clear-cache/:userId",
+      async (req, res) => {
+        try {
+          // Verificar si es solicitud local
+          const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1';
+
+          // Si no es localhost, verificar autenticación admin
+          if (!isLocalhost && (!req.user || req.user.role !== 'admin')) {
+            return res.status(403).json({ error: "Acceso denegado" });
+          }
+
+          const { userId } = req.params;
+          const sessionManager = require("../services/sessionManager");
+
+          // Limpiar caché de sessionManager
+          if (sessionManager.localCache && sessionManager.localCache.has(userId)) {
+            sessionManager.localCache.delete(userId);
+          }
+
+          // Limpiar caché de userDataManager
+          if (userDataManager.cache && userDataManager.cache.has(userId)) {
+            userDataManager.cache.delete(userId);
+          }
+
+          // Limpiar caché de humanModeManager
+          if (humanModeManager.localCache && humanModeManager.localCache.has(userId)) {
+            humanModeManager.localCache.delete(userId);
+          }
+
+          res.json({
+            success: true,
+            message: `Caché limpiado para el usuario ${userId}`,
+            clearedCaches: ['sessionManager', 'userDataManager', 'humanModeManager']
+          });
+        } catch (error) {
+          console.error("Error limpiando caché del usuario:", error);
+          res.status(500).json({ error: "Error limpiando caché del usuario" });
+        }
+      }
+    );
+
     // ===== ENDPOINTS DE GESTIÓN DE CSV (SOLO ADMIN) =====
 
     // Configurar multer para subida de archivos
