@@ -1,20 +1,5 @@
-const makeWASocket = require("baileys").default;
-const {
-  DisconnectReason,
-  useMultiFileAuthState,
-  makeCacheableSignalKeyStore,
-  fetchLatestBaileysVersion,
-} = require("baileys");
-
-// makeInMemoryStore is optional in some Baileys versions
-let makeInMemoryStore;
-try {
-  makeInMemoryStore = require("baileys").makeInMemoryStore;
-} catch (e) {
-  console.log("makeInMemoryStore not available in this Baileys version");
-}
+const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
-const pino = require("pino");
 const config = require("../config/config");
 const logger = require("../services/logger");
 const aiService = require("../services/aiService");
@@ -27,358 +12,242 @@ const followUpManager = require("../services/followUpManager");
 
 class WhatsAppBot {
   constructor() {
-    this.sock = null;
+    this.client = null;
     this.systemPrompt = promptLoader.getPrompt();
-    this.store = null;
     this.currentQR = null;
-    this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 3;
-    this.isReconnecting = false;
+    this.isReady = false;
+    this.messageProcessingQueue = new Map();
   }
 
   async start() {
-    if (this.isReconnecting) {
-      console.log("Ya hay un intento de reconexión en progreso...");
-      return;
-    }
-
-    this.isReconnecting = true;
-    console.log("Iniciando bot de WhatsApp con Baileys...");
+    console.log("Iniciando bot de WhatsApp con whatsapp-web.js...");
     config.validateApiKey();
 
     try {
-      // Configurar autenticación multi-archivo
-      const { state, saveCreds } = await useMultiFileAuthState(
-        "./auth_baileys"
-      );
-
-      // Obtener versión más reciente de Baileys
-      const { version, isLatest } = await fetchLatestBaileysVersion();
-      console.log(
-        `Usando versión de WhatsApp Web: ${version.join(
-          "."
-        )} (última: ${isLatest})`
-      );
-
-      // Crear store en memoria para manejar mensajes (si está disponible)
-      if (makeInMemoryStore) {
-        this.store = makeInMemoryStore({
-          logger: pino({ level: "silent" }),
-        });
-      } else {
-        console.log("Continuando sin makeInMemoryStore");
-        this.store = null;
-      }
-
-      // Crear socket de WhatsApp con configuración mejorada para VPS
-      this.sock = makeWASocket({
-        version,
-        auth: {
-          creds: state.creds,
-          keys: makeCacheableSignalKeyStore(
-            state.keys,
-            pino({ level: "silent" })
-          ),
+      // Crear cliente de WhatsApp con LocalAuth
+      this.client = new Client({
+        authStrategy: new LocalAuth({
+          dataPath: "./.wwebjs_auth",
+        }),
+        puppeteer: {
+          headless: true,
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-accelerated-2d-canvas",
+            "--no-first-run",
+            "--no-zygote",
+            "--disable-gpu",
+          ],
         },
-        printQRInTerminal: false,
-        logger: pino({ level: "silent" }),
-        browser: ["Chrome (Linux)", "", ""],
-        generateHighQualityLinkPreview: false,
-        syncFullHistory: false,
-        getMessage: async (key) => {
-          if (this.store) {
-            const msg = await this.store.loadMessage(key.remoteJid, key.id);
-            return msg?.message || undefined;
-          }
-          return { conversation: "No disponible" };
+        webVersionCache: {
+          type: "remote",
+          remotePath:
+            "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html",
         },
-        defaultQueryTimeoutMs: undefined,
-        // Timeouts más largos para VPS con conexión variable
-        connectTimeoutMs: 120000, // 2 minutos
-        keepAliveIntervalMs: 45000, // 45 segundos
-        qrTimeout: 60000, // 1 minuto para QR
-        markOnlineOnConnect: false,
-        msgRetryCounterCache: new Map(),
-        retryRequestDelayMs: 500, // Mayor delay entre reintentos
-        maxMsgRetryCount: 3, // Menos reintentos para evitar loops
-        // Opciones adicionales para estabilidad en VPS
-        shouldIgnoreJid: (jid) => false,
-        cachedGroupMetadata: async (jid) => null,
-        transactionOpts: { maxCommitRetries: 10, delayBetweenTriesMs: 3000 },
       });
 
-      // Vincular store al socket
-      if (this.store) {
-        this.store.bind(this.sock.ev);
-      }
-
-      // Guardar credenciales cuando se actualicen
-      this.sock.ev.on("creds.update", saveCreds);
-
-      // Manejar actualizaciones de conexión
-      this.sock.ev.on("connection.update", (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-          console.log("Escanea este código QR con WhatsApp:");
-          console.log("O visita: http://tu-servidor:4242/qr");
-          this.currentQR = qr;
-          qrcode.generate(qr, { small: true });
-        }
-
-        if (connection === "close") {
-          const statusCode = lastDisconnect?.error?.output?.statusCode;
-          const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-          const errorMessage = lastDisconnect?.error?.message || "desconocido";
-
-          console.log(
-            `⚠️  Conexión cerrada - Código: ${statusCode}, Error: ${errorMessage}, Reconectar: ${shouldReconnect}`
-          );
-
-          // Manejo específico del error 515 (Stream Error) - común en VPS
-          if (statusCode === 515) {
-            this.reconnectAttempts++;
-            console.log(
-              `🔄 Error 515 (Stream Error) detectado. Intento ${this.reconnectAttempts}/${this.maxReconnectAttempts}`
-            );
-
-            if (this.reconnectAttempts > this.maxReconnectAttempts) {
-              console.log(
-                "❌ Máximo de intentos de reconexión alcanzado para error 515."
-              );
-              console.log("   Posibles causas:");
-              console.log("   - Conexión de red inestable en el VPS");
-              console.log("   - Firewall bloqueando WebSockets");
-              console.log("   - Recursos insuficientes (RAM/CPU)");
-              console.log("   Por favor, reinicia la sesión en /qr");
-              this.isReconnecting = false;
-              return;
-            }
-
-            // Para error 515, esperar más tiempo antes de reconectar
-            const retryDelay = 10000 + (this.reconnectAttempts * 5000); // 10s, 15s, 20s
-            console.log(`   Esperando ${retryDelay / 1000}s antes de reintentar...`);
-            this.isReconnecting = false;
-            setTimeout(() => this.start(), retryDelay);
-            return;
-          }
-
-          // Si es error 405, 401 o 403, limpiar sesión y reiniciar con límite
-          if (statusCode === 405 || statusCode === 401 || statusCode === 403) {
-            this.reconnectAttempts++;
-
-            if (this.reconnectAttempts > this.maxReconnectAttempts) {
-              console.log(
-                "❌ Máximo de intentos de reconexión alcanzado. Por favor usa el botón de reiniciar sesión en /qr"
-              );
-              this.isReconnecting = false;
-              return;
-            }
-
-            console.log(
-              `Error ${statusCode} detectado. Intento ${this.reconnectAttempts}/${this.maxReconnectAttempts}. Limpiando sesión...`
-            );
-            this.clearSession();
-
-            this.isReconnecting = false;
-            setTimeout(() => this.start(), 5000);
-          } else if (
-            shouldReconnect &&
-            statusCode !== DisconnectReason.loggedOut
-          ) {
-            this.reconnectAttempts = 0;
-            this.isReconnecting = false;
-            setTimeout(() => this.start(), 5000);
-          } else {
-            this.isReconnecting = false;
-          }
-        } else if (connection === "open") {
-          console.log("¡Bot de WhatsApp conectado y listo!");
-          this.currentQR = null;
-          this.reconnectAttempts = 0;
-          this.isReconnecting = false;
-          logger.log("SYSTEM", "Bot iniciado correctamente con Baileys");
-
-          // Inicializar follow-up manager
-          followUpManager.initialize().then(() => {
-            followUpManager.startFollowUpTimer(
-              this.sock,
-              aiService,
-              sessionManager
-            );
-          });
-
-          // Iniciar timer de limpieza de sesiones con referencia al followUpManager
-          sessionManager.startCleanupTimer(this.sock, followUpManager);
-        }
+      // Evento: QR Code
+      this.client.on("qr", (qr) => {
+        console.log("Escanea este código QR con WhatsApp:");
+        console.log("O visita: http://tu-servidor:" + config.webPort + "/qr");
+        this.currentQR = qr;
+        qrcode.generate(qr, { small: true });
       });
 
-      // Manejar mensajes entrantes
-      this.sock.ev.on("messages.upsert", async (m) => {
+      // Evento: Autenticación exitosa
+      this.client.on("authenticated", () => {
+        console.log("✅ Autenticación exitosa");
+        this.currentQR = null;
+      });
+
+      // Evento: Fallo de autenticación
+      this.client.on("auth_failure", (msg) => {
+        console.error("❌ Fallo de autenticación:", msg);
+        this.currentQR = null;
+      });
+
+      // Evento: Cliente listo
+      this.client.on("ready", async () => {
+        console.log("¡Bot de WhatsApp conectado y listo!");
+        this.isReady = true;
+        this.currentQR = null;
+        logger.log("SYSTEM", "Bot iniciado correctamente con whatsapp-web.js");
+
+        // Inicializar follow-up manager
+        await followUpManager.initialize();
+        followUpManager.startFollowUpTimer(
+          this.client,
+          aiService,
+          sessionManager
+        );
+
+        // Iniciar timer de limpieza de sesiones
+        sessionManager.startCleanupTimer(this.client, followUpManager);
+      });
+
+      // Evento: Desconexión
+      this.client.on("disconnected", (reason) => {
+        console.log("⚠️  Bot desconectado:", reason);
+        this.isReady = false;
+        this.currentQR = null;
+
+        // Reintentar conexión después de 5 segundos
+        console.log("🔄 Reintentando conexión en 5 segundos...");
+        setTimeout(() => {
+          this.start();
+        }, 5000);
+      });
+
+      // Evento: Cambio de estado de carga
+      this.client.on("loading_screen", (percent, message) => {
+        console.log(`Cargando: ${percent}% - ${message}`);
+      });
+
+      // Evento: Mensajes entrantes
+      this.client.on("message", async (msg) => {
         try {
-          const msg = m.messages[0];
-          if (!msg.message) return;
-
-          // Log para debugging
-          console.log(
-            "Mensaje recibido - fromMe:",
-            msg.key.fromMe,
-            "remoteJid:",
-            msg.key.remoteJid
-          );
-
-          // Ignorar mensajes propios
-          if (msg.key.fromMe) {
-            console.log("Ignorando mensaje propio");
-            return;
-          }
-
-          // Obtener el número del remitente
-          const from = msg.key.remoteJid;
-          const isGroup = from.endsWith("@g.us");
-
-          // Solo responder a mensajes privados
-          if (isGroup) return;
-
-          // Obtener el texto del mensaje
-          const conversation =
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            "";
-
-          // Ignorar mensajes sin texto
-          if (!conversation || conversation.trim() === "") {
-            console.log("Mensaje ignorado - Sin contenido de texto");
-            return;
-          }
-
-          // Extraer información del usuario
-          const userId = from.replace("@s.whatsapp.net", "");
-          const userName = msg.pushName || userId;
-
-          // Implementar un sistema de debounce para evitar procesamiento duplicado
-          if (!this.messageProcessingQueue) {
-            this.messageProcessingQueue = new Map();
-          }
-
-          // Crear clave única para el mensaje
-          const messageKey = `${userId}_${conversation}_${Date.now()}`;
-
-          // Verificar si ya estamos procesando un mensaje similar
-          const recentKey = Array.from(this.messageProcessingQueue.keys()).find(
-            (key) => {
-              const [id, content] = key.split("_");
-              return id === userId && content === conversation;
-            }
-          );
-
-          if (
-            recentKey &&
-            Date.now() - this.messageProcessingQueue.get(recentKey) < 2000
-          ) {
-            console.log(`Mensaje duplicado ignorado de ${userId}`);
-            return;
-          }
-
-          // Marcar mensaje como en procesamiento
-          this.messageProcessingQueue.set(messageKey, Date.now());
-
-          // Limpiar mensajes antiguos del queue
-          for (const [
-            key,
-            timestamp,
-          ] of this.messageProcessingQueue.entries()) {
-            if (Date.now() - timestamp > 5000) {
-              this.messageProcessingQueue.delete(key);
-            }
-          }
-
-          await logger.log("cliente", conversation, userId, userName);
-
-          // Verificar si está en modo humano o soporte
-          const isHuman = await humanModeManager.isHumanMode(userId);
-          const isSupport = await humanModeManager.isSupportMode(userId);
-
-          if (isHuman || isSupport) {
-            const mode = isSupport ? "SOPORTE" : "HUMANO";
-            await logger.log(
-              "SYSTEM",
-              `Mensaje ignorado - Modo ${mode} activo para ${userName} (${userId})`
-            );
-            this.messageProcessingQueue.delete(messageKey);
-
-            // Detener seguimiento si está activo (ya está en conversación activa)
-            if (await followUpManager.isFollowUpActive(userId)) {
-              await followUpManager.stopFollowUp(userId, "modo_humano_activo");
-            }
-
-            return;
-          }
-
-          // Procesar mensaje y generar respuesta
-          const response = await this.processMessage(
-            userId,
-            conversation,
-            from
-          );
-
-          // Enviar respuesta solo si tenemos una respuesta válida
-          if (response && response.trim() !== "") {
-            await this.sock.sendMessage(from, { text: response });
-            await logger.log("bot", response, userId, userName);
-          }
-
-          // Analizar estado de la conversación después de la respuesta
-          const conversationHistory = await sessionManager.getMessages(
-            userId,
-            from
-          );
-          const status = await aiService.analyzeConversationStatus(
-            conversationHistory,
-            conversation
-          );
-
-          console.log(
-            `[FollowUp] Estado de conversación para ${userId}: ${status}`
-          );
-
-          // Manejar seguimientos basados en el estado
-          if (
-            status === "ACEPTADO" ||
-            status === "RECHAZADO" ||
-            status === "FRUSTRADO"
-          ) {
-            // Detener seguimiento si existe
-            if (await followUpManager.isFollowUpActive(userId)) {
-              await followUpManager.stopFollowUp(userId, status.toLowerCase());
-            }
-          } else if (status === "ACTIVO") {
-            // Cliente respondió - detener seguimiento si existe
-            if (await followUpManager.isFollowUpActive(userId)) {
-              await followUpManager.stopFollowUp(userId, "volvio_activo");
-            }
-            // NO iniciar seguimiento aquí - se iniciará automáticamente a los 5 minutos por sessionManager
-          }
-          // NO manejamos INACTIVO aquí - el sessionManager lo hace a los 5 minutos
-
-          // Eliminar del queue después de procesar
-          this.messageProcessingQueue.delete(messageKey);
+          await this.handleMessage(msg);
         } catch (error) {
-          await this.handleError(error, m.messages[0]);
+          await this.handleError(error, msg);
         }
       });
+
+      // Inicializar cliente
+      await this.client.initialize();
     } catch (error) {
       console.error("Error iniciando bot:", error);
-      this.isReconnecting = false;
+      console.log("Reintentando en 5 segundos...");
+      setTimeout(() => this.start(), 5000);
+    }
+  }
 
-      if (this.reconnectAttempts < this.maxReconnectAttempts) {
-        this.reconnectAttempts++;
-        console.log(
-          `Reintentando en 5 segundos... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`
-        );
-        setTimeout(() => this.start(), 5000);
+  async handleMessage(msg) {
+    // Ignorar mensajes propios
+    if (msg.fromMe) {
+      console.log("Ignorando mensaje propio");
+      return;
+    }
+
+    // Obtener información del chat
+    const chat = await msg.getChat();
+    const isGroup = chat.isGroup;
+
+    // Solo responder a mensajes privados
+    if (isGroup) return;
+
+    // Obtener el texto del mensaje
+    const messageBody = msg.body || "";
+
+    // Ignorar mensajes sin texto
+    if (!messageBody || messageBody.trim() === "") {
+      console.log("Mensaje ignorado - Sin contenido de texto");
+      return;
+    }
+
+    // Extraer información del usuario
+    const contact = await msg.getContact();
+    const userId = msg.from.replace("@c.us", "");
+    const userName = contact.pushname || contact.name || userId;
+
+    console.log(
+      `Mensaje recibido de ${userName} (${userId}): ${messageBody.substring(0, 50)}...`
+    );
+
+    // Sistema de debounce para evitar procesamiento duplicado
+    const messageKey = `${userId}_${messageBody}_${Date.now()}`;
+
+    // Verificar si ya estamos procesando un mensaje similar
+    const recentKey = Array.from(this.messageProcessingQueue.keys()).find(
+      (key) => {
+        const [id, content] = key.split("_");
+        return id === userId && content === messageBody;
+      }
+    );
+
+    if (
+      recentKey &&
+      Date.now() - this.messageProcessingQueue.get(recentKey) < 2000
+    ) {
+      console.log(`Mensaje duplicado ignorado de ${userId}`);
+      return;
+    }
+
+    // Marcar mensaje como en procesamiento
+    this.messageProcessingQueue.set(messageKey, Date.now());
+
+    // Limpiar mensajes antiguos del queue
+    for (const [key, timestamp] of this.messageProcessingQueue.entries()) {
+      if (Date.now() - timestamp > 5000) {
+        this.messageProcessingQueue.delete(key);
       }
     }
+
+    await logger.log("cliente", messageBody, userId, userName);
+
+    // Verificar si está en modo humano o soporte
+    const isHuman = await humanModeManager.isHumanMode(userId);
+    const isSupport = await humanModeManager.isSupportMode(userId);
+
+    if (isHuman || isSupport) {
+      const mode = isSupport ? "SOPORTE" : "HUMANO";
+      await logger.log(
+        "SYSTEM",
+        `Mensaje ignorado - Modo ${mode} activo para ${userName} (${userId})`
+      );
+      this.messageProcessingQueue.delete(messageKey);
+
+      // Detener seguimiento si está activo
+      if (await followUpManager.isFollowUpActive(userId)) {
+        await followUpManager.stopFollowUp(userId, "modo_humano_activo");
+      }
+
+      return;
+    }
+
+    // Procesar mensaje y generar respuesta
+    const response = await this.processMessage(userId, messageBody, msg.from);
+
+    // Enviar respuesta solo si tenemos una respuesta válida
+    if (response && response.trim() !== "") {
+      await msg.reply(response);
+      await logger.log("bot", response, userId, userName);
+    }
+
+    // Analizar estado de la conversación después de la respuesta
+    const conversationHistory = await sessionManager.getMessages(
+      userId,
+      msg.from
+    );
+    const status = await aiService.analyzeConversationStatus(
+      conversationHistory,
+      messageBody
+    );
+
+    console.log(
+      `[FollowUp] Estado de conversación para ${userId}: ${status}`
+    );
+
+    // Manejar seguimientos basados en el estado
+    if (
+      status === "ACEPTADO" ||
+      status === "RECHAZADO" ||
+      status === "FRUSTRADO"
+    ) {
+      // Detener seguimiento si existe
+      if (await followUpManager.isFollowUpActive(userId)) {
+        await followUpManager.stopFollowUp(userId, status.toLowerCase());
+      }
+    } else if (status === "ACTIVO") {
+      // Cliente respondió - detener seguimiento si existe
+      if (await followUpManager.isFollowUpActive(userId)) {
+        await followUpManager.stopFollowUp(userId, "volvio_activo");
+      }
+    }
+
+    // Eliminar del queue después de procesar
+    this.messageProcessingQueue.delete(messageKey);
   }
 
   async processMessage(userId, userMessage, chatId) {
@@ -428,9 +297,12 @@ Antes de enviarte la información, ¿podrías compartirme tu *nombre* para perso
       if (userDataManager.isValidName(trimmedMessage)) {
         // Capitalizar nombre (primera letra de cada palabra en mayúscula)
         const capitalizedName = trimmedMessage
-          .split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-          .join(' ');
+          .split(" ")
+          .map(
+            (word) =>
+              word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+          )
+          .join(" ");
 
         await userDataManager.setUserData(userId, { name: capitalizedName });
         await userDataManager.markNameCollected(userId);
@@ -513,18 +385,23 @@ Puedo ayudarte a conocer nuestras ubicaciones, precios y beneficios exclusivos.
     // Detectar email
     if (emailRegex.test(trimmedMessage.toLowerCase())) {
       // Verificar si hay una activación de soporte pendiente (cita agendada)
-      const hasPending = await userDataManager.hasPendingSupportActivation(userId);
-      console.log(`[DEBUG-EMAIL] Usuario ${userId} - hasPendingSupportActivation: ${hasPending}`);
+      const hasPending =
+        await userDataManager.hasPendingSupportActivation(userId);
+      console.log(
+        `[DEBUG-EMAIL] Usuario ${userId} - hasPendingSupportActivation: ${hasPending}`
+      );
 
       if (hasPending) {
-        console.log(`[DEBUG-EMAIL] Redirigiendo a handleEmailCollection para ${userId}`);
+        console.log(
+          `[DEBUG-EMAIL] Redirigiendo a handleEmailCollection para ${userId}`
+        );
         // Agregar mensaje del usuario a la sesión ANTES de manejar el email
         await sessionManager.addMessage(userId, "user", userMessage, chatId);
-        // Redirigir al manejador de email para soporte (que mostrará directamente la cita y asesor)
+        // Redirigir al manejador de email para soporte
         return await this.handleEmailCollection(userId, userMessage, chatId);
       }
 
-      // Si no hay soporte pendiente, procesar email normalmente (SIN confirmación del correo)
+      // Si no hay soporte pendiente, procesar email normalmente
       console.log(`[DEBUG-EMAIL] Procesando email normalmente para ${userId}`);
       const email = trimmedMessage.toLowerCase();
       await userDataManager.setUserData(userId, { email: email });
@@ -634,18 +511,26 @@ Puedo ayudarte a conocer nuestras ubicaciones, precios y beneficios exclusivos.
 
     // Generar respuesta con IA
     const aiResponse = await aiService.generateResponse(messages);
-    console.log(`[DEBUG-AI] Respuesta de IA para ${userId}: ${aiResponse.substring(0, 200)}...`);
+    console.log(
+      `[DEBUG-AI] Respuesta de IA para ${userId}: ${aiResponse.substring(0, 200)}...`
+    );
 
     // Verificar si la respuesta contiene el marcador de solicitar email para cita
     if (aiResponse.includes("{{SOLICITAR_EMAIL_PARA_CITA}}")) {
-      console.log(`[DEBUG-AI] Marcador {{SOLICITAR_EMAIL_PARA_CITA}} detectado para ${userId}`);
+      console.log(
+        `[DEBUG-AI] Marcador {{SOLICITAR_EMAIL_PARA_CITA}} detectado para ${userId}`
+      );
 
       // Activar flag de pending support activation
       await userDataManager.setPendingSupportActivation(userId, true);
-      console.log(`[DEBUG-SUPPORT] Flag pendingSupportActivation establecido para ${userId}`);
+      console.log(
+        `[DEBUG-SUPPORT] Flag pendingSupportActivation establecido para ${userId}`
+      );
 
       // Remover el marcador de la respuesta antes de enviar
-      const cleanResponse = aiResponse.replace("{{SOLICITAR_EMAIL_PARA_CITA}}", "").trim();
+      const cleanResponse = aiResponse
+        .replace("{{SOLICITAR_EMAIL_PARA_CITA}}", "")
+        .trim();
 
       // Agregar respuesta limpia a la sesión
       await sessionManager.addMessage(userId, "assistant", cleanResponse, chatId);
@@ -655,7 +540,9 @@ Puedo ayudarte a conocer nuestras ubicaciones, precios y beneficios exclusivos.
 
     // Verificar si la respuesta contiene el marcador de activar soporte
     if (aiResponse.includes("{{ACTIVAR_SOPORTE}}")) {
-      console.log(`[DEBUG-AI] Marcador {{ACTIVAR_SOPORTE}} detectado para ${userId}`);
+      console.log(
+        `[DEBUG-AI] Marcador {{ACTIVAR_SOPORTE}} detectado para ${userId}`
+      );
       // Primero verificar si tenemos el email del usuario
       const userData = await userDataManager.getUserData(userId);
       if (!userData || !userData.email) {
@@ -675,7 +562,9 @@ Puedo ayudarte a conocer nuestras ubicaciones, precios y beneficios exclusivos.
         }
 
         await userDataManager.setPendingSupportActivation(userId, true);
-        console.log(`[DEBUG-SUPPORT] Flag pendingSupportActivation establecido para ${userId}`);
+        console.log(
+          `[DEBUG-SUPPORT] Flag pendingSupportActivation establecido para ${userId}`
+        );
 
         const emailRequest = `Para poder asignarte un asesor especializado y mantener un seguimiento de tu caso, necesito tu correo electrónico.\n\n📧 Por favor, proporciona tu correo electrónico:`;
         return emailRequest;
@@ -725,8 +614,8 @@ Puedo ayudarte a conocer nuestras ubicaciones, precios y beneficios exclusivos.
   async handleError(error, message) {
     console.error("Error procesando mensaje:", error);
 
-    const from = message.key.remoteJid;
-    const userId = from.replace("@s.whatsapp.net", "");
+    const from = message.from;
+    const userId = from.replace("@c.us", "");
 
     let errorMessage = "Lo siento, ocurrió un error. Inténtalo de nuevo.";
 
@@ -739,7 +628,7 @@ Puedo ayudarte a conocer nuestras ubicaciones, precios y beneficios exclusivos.
     }
 
     try {
-      await this.sock.sendMessage(from, { text: errorMessage });
+      await message.reply(errorMessage);
       logger.log("ERROR", error.message, userId);
     } catch (sendError) {
       console.error("Error enviando mensaje de error:", sendError);
@@ -748,15 +637,15 @@ Puedo ayudarte a conocer nuestras ubicaciones, precios y beneficios exclusivos.
 
   async stop() {
     console.log("Cerrando bot...");
-    if (this.sock) {
-      this.sock.end();
+    if (this.client) {
+      await this.client.destroy();
     }
   }
 
   async clearSession() {
     const fs = require("fs").promises;
     const path = require("path");
-    const authPath = path.join(process.cwd(), "auth_baileys");
+    const authPath = path.join(process.cwd(), ".wwebjs_auth");
 
     try {
       await fs.rm(authPath, { recursive: true, force: true });
@@ -769,15 +658,8 @@ Puedo ayudarte a conocer nuestras ubicaciones, precios y beneficios exclusivos.
   async logout() {
     console.log("Cerrando sesión de WhatsApp...");
     try {
-      this.reconnectAttempts = 0;
-      this.isReconnecting = false;
-
-      if (this.sock) {
-        try {
-          await this.sock.logout();
-        } catch (err) {
-          console.log("Error al hacer logout:", err.message);
-        }
+      if (this.client) {
+        await this.client.logout();
       }
 
       await this.clearSession();
@@ -813,8 +695,11 @@ Puedo ayudarte a conocer nuestras ubicaciones, precios y beneficios exclusivos.
     const userData = await userDataManager.getUserData(userId);
 
     // Verificar si había una activación de soporte pendiente
-    const hasPendingSupport = await userDataManager.hasPendingSupportActivation(userId);
-    console.log(`[DEBUG] hasPendingSupportActivation para ${userId}: ${hasPendingSupport}`);
+    const hasPendingSupport =
+      await userDataManager.hasPendingSupportActivation(userId);
+    console.log(
+      `[DEBUG] hasPendingSupportActivation para ${userId}: ${hasPendingSupport}`
+    );
 
     if (hasPendingSupport) {
       // Limpiar el flag de soporte pendiente
@@ -844,7 +729,7 @@ Puedo ayudarte a conocer nuestras ubicaciones, precios y beneficios exclusivos.
         console.error("[Bot] Error analizando conversación:", error);
       }
 
-      // Preparar respuesta directamente con información del asesor (sin mensaje intermedio)
+      // Preparar respuesta directamente con información del asesor
       let response = `📋 *Tu cita ha sido registrada*\n\n`;
 
       if (asesorAsignado) {
