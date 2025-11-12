@@ -70,7 +70,7 @@ class WhatsAppBot {
         this.store = null;
       }
 
-      // Crear socket de WhatsApp con configuración mejorada para producción
+      // Crear socket de WhatsApp con configuración mejorada para VPS
       this.sock = makeWASocket({
         version,
         auth: {
@@ -93,13 +93,18 @@ class WhatsAppBot {
           return { conversation: "No disponible" };
         },
         defaultQueryTimeoutMs: undefined,
-        connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 30000,
-        qrTimeout: undefined,
+        // Timeouts más largos para VPS con conexión variable
+        connectTimeoutMs: 120000, // 2 minutos
+        keepAliveIntervalMs: 45000, // 45 segundos
+        qrTimeout: 60000, // 1 minuto para QR
         markOnlineOnConnect: false,
         msgRetryCounterCache: new Map(),
-        retryRequestDelayMs: 250,
-        maxMsgRetryCount: 5,
+        retryRequestDelayMs: 500, // Mayor delay entre reintentos
+        maxMsgRetryCount: 3, // Menos reintentos para evitar loops
+        // Opciones adicionales para estabilidad en VPS
+        shouldIgnoreJid: (jid) => false,
+        cachedGroupMetadata: async (jid) => null,
+        transactionOpts: { maxCommitRetries: 10, delayBetweenTriesMs: 3000 },
       });
 
       // Vincular store al socket
@@ -124,14 +129,41 @@ class WhatsAppBot {
         if (connection === "close") {
           const statusCode = lastDisconnect?.error?.output?.statusCode;
           const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+          const errorMessage = lastDisconnect?.error?.message || "desconocido";
+
           console.log(
-            "Conexión cerrada debido a",
-            lastDisconnect?.error,
-            ", reconectando:",
-            shouldReconnect
+            `⚠️  Conexión cerrada - Código: ${statusCode}, Error: ${errorMessage}, Reconectar: ${shouldReconnect}`
           );
 
-          // Si es error 405 o 401, limpiar sesión y reiniciar con límite
+          // Manejo específico del error 515 (Stream Error) - común en VPS
+          if (statusCode === 515) {
+            this.reconnectAttempts++;
+            console.log(
+              `🔄 Error 515 (Stream Error) detectado. Intento ${this.reconnectAttempts}/${this.maxReconnectAttempts}`
+            );
+
+            if (this.reconnectAttempts > this.maxReconnectAttempts) {
+              console.log(
+                "❌ Máximo de intentos de reconexión alcanzado para error 515."
+              );
+              console.log("   Posibles causas:");
+              console.log("   - Conexión de red inestable en el VPS");
+              console.log("   - Firewall bloqueando WebSockets");
+              console.log("   - Recursos insuficientes (RAM/CPU)");
+              console.log("   Por favor, reinicia la sesión en /qr");
+              this.isReconnecting = false;
+              return;
+            }
+
+            // Para error 515, esperar más tiempo antes de reconectar
+            const retryDelay = 10000 + (this.reconnectAttempts * 5000); // 10s, 15s, 20s
+            console.log(`   Esperando ${retryDelay / 1000}s antes de reintentar...`);
+            this.isReconnecting = false;
+            setTimeout(() => this.start(), retryDelay);
+            return;
+          }
+
+          // Si es error 405, 401 o 403, limpiar sesión y reiniciar con límite
           if (statusCode === 405 || statusCode === 401 || statusCode === 403) {
             this.reconnectAttempts++;
 
