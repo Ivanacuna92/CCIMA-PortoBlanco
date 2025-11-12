@@ -24,23 +24,37 @@ class WhatsAppBot {
     config.validateApiKey();
 
     try {
+      // Detectar Chrome instalado en el sistema
+      const chromePath = config.getChromePath();
+
+      // Configuración de Puppeteer
+      const puppeteerConfig = {
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-accelerated-2d-canvas",
+          "--no-first-run",
+          "--no-zygote",
+          "--disable-gpu",
+        ],
+      };
+
+      // Si encontramos Chrome, usarlo
+      if (chromePath) {
+        puppeteerConfig.executablePath = chromePath;
+        console.log("🌐 Usando Chrome del sistema");
+      } else {
+        console.log("🌐 Usando Chromium de Puppeteer");
+      }
+
       // Crear cliente de WhatsApp con LocalAuth
       this.client = new Client({
         authStrategy: new LocalAuth({
           dataPath: "./.wwebjs_auth",
         }),
-        puppeteer: {
-          headless: true,
-          args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-accelerated-2d-canvas",
-            "--no-first-run",
-            "--no-zygote",
-            "--disable-gpu",
-          ],
-        },
+        puppeteer: puppeteerConfig,
         webVersionCache: {
           type: "remote",
           remotePath:
