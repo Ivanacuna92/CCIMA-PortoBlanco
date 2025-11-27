@@ -4,6 +4,7 @@ import ChatPanel from './components/ChatPanel';
 import Dashboard from './components/Dashboard';
 import Reports from './components/Reports';
 import TerrenosUpload from './components/TerrenosUpload';
+import Voicebot from './components/voicebot/Voicebot';
 import Header from './components/Header';
 import Login from './components/Login';
 import { checkAuth, logout } from './services/api';
@@ -134,6 +135,8 @@ function App() {
         <Reports />
       ) : currentView === 'terrenos' ? (
         <TerrenosUpload />
+      ) : currentView === 'voicebot' && user?.role === 'admin' ? (
+        <Voicebot />
       ) : (
         <div className="flex flex-1 overflow-hidden">
           <ContactsList 

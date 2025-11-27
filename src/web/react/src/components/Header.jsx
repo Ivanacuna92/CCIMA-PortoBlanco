@@ -50,6 +50,18 @@ function Header({ currentView, onViewChange, user, onLogout }) {
               Terrenos
             </button>
           )}
+          {user?.role === 'admin' && (
+            <button
+              className={`px-8 py-2 rounded-md font-medium transition-all ${
+                currentView === 'voicebot'
+                  ? 'bg-navetec-primary text-white'
+                  : 'text-gray-600 hover:text-navetec-primary'
+              }`}
+              onClick={() => onViewChange('voicebot')}
+            >
+              VoiceBot
+            </button>
+          )}
         </nav>
         
         {user && (

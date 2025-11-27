@@ -6,6 +6,35 @@ class AuthService {
     constructor() {
         this.saltRounds = 10;
         this.tokenExpireHours = 24; // Sesiones válidas por 24 horas
+        // Caché de sesiones en memoria para evitar queries constantes
+        this.sessionCache = new Map();
+        this.cacheTTL = 60000; // 1 minuto de caché
+    }
+
+    // Limpiar entrada de caché
+    clearSessionCache(token) {
+        this.sessionCache.delete(token);
+    }
+
+    // Obtener sesión de caché si está válida
+    getFromCache(token) {
+        const cached = this.sessionCache.get(token);
+        if (cached && Date.now() < cached.cacheExpires) {
+            return cached.session;
+        }
+        // Si expiró el caché, eliminarlo
+        if (cached) {
+            this.sessionCache.delete(token);
+        }
+        return null;
+    }
+
+    // Guardar sesión en caché
+    saveToCache(token, session) {
+        this.sessionCache.set(token, {
+            session,
+            cacheExpires: Date.now() + this.cacheTTL
+        });
     }
 
     // Verificar credenciales y crear sesión
@@ -71,13 +100,19 @@ class AuthService {
                 return null;
             }
 
-            // Buscar sesión válida
+            // Primero verificar caché
+            const cachedSession = this.getFromCache(token);
+            if (cachedSession) {
+                return cachedSession;
+            }
+
+            // Buscar sesión válida en BD
             const session = await database.query(`
                 SELECT s.*, u.id as user_id, u.email, u.name, u.role, u.active
                 FROM support_sessions s
                 JOIN support_users u ON s.user_id = u.id
-                WHERE s.session_token = ? 
-                AND s.expires_at > NOW() 
+                WHERE s.session_token = ?
+                AND s.expires_at > NOW()
                 AND u.active = 1
             `, [token]);
 
@@ -86,7 +121,7 @@ class AuthService {
             }
 
             const sessionData = session[0];
-            return {
+            const result = {
                 user: {
                     id: sessionData.user_id,
                     email: sessionData.email,
@@ -95,8 +130,19 @@ class AuthService {
                 },
                 expiresAt: sessionData.expires_at
             };
+
+            // Guardar en caché para evitar queries frecuentes
+            this.saveToCache(token, result);
+
+            return result;
         } catch (error) {
             console.error('Error verificando sesión:', error);
+            // En caso de error de BD, intentar usar caché aunque haya expirado
+            const cached = this.sessionCache.get(token);
+            if (cached) {
+                console.log('Usando sesión de caché debido a error de BD');
+                return cached.session;
+            }
             return null;
         }
     }
@@ -107,6 +153,9 @@ class AuthService {
             if (!token) {
                 return;
             }
+
+            // Limpiar caché
+            this.clearSessionCache(token);
 
             await database.delete('support_sessions', 'session_token = ?', [token]);
         } catch (error) {

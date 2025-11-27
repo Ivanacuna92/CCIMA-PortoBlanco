@@ -16,6 +16,7 @@ const {
   requireSupportOrAdmin,
 } = require("../middleware/auth");
 const ViteExpress = require("vite-express");
+const voicebotRoutes = require("./voicebotRoutes");
 
 class WebServer {
   constructor(port = 3000) {
@@ -26,6 +27,9 @@ class WebServer {
   }
 
   setupMiddleware() {
+    // Confiar en proxy para detectar HTTPS correctamente
+    this.app.set('trust proxy', 1);
+
     this.app.use(
       cors({
         origin: true,
@@ -399,11 +403,14 @@ class WebServer {
         const loginResult = await authService.login(email, password);
 
         // Establecer cookie httpOnly
+        // secure: true solo si usamos HTTPS (verificar con X-Forwarded-Proto o configuración)
+        const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
         res.cookie("auth_token", loginResult.token, {
           httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
+          secure: isSecure,
           sameSite: "lax",
           expires: loginResult.expiresAt,
+          path: "/"
         });
 
         res.json({
@@ -445,6 +452,9 @@ class WebServer {
 
     // ===== TODAS LAS DEMÁS RUTAS REQUIEREN AUTENTICACIÓN =====
     this.app.use("/api", requireAuth);
+
+    // ===== RUTAS DEL VOICEBOT =====
+    this.app.use("/api/voicebot", voicebotRoutes);
 
     // API endpoint para obtener logs
     this.app.get("/api/logs/:date?", async (req, res) => {
