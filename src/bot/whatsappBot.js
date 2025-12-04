@@ -55,11 +55,7 @@ class WhatsAppBot {
           dataPath: "./.wwebjs_auth",
         }),
         puppeteer: puppeteerConfig,
-        webVersionCache: {
-          type: "remote",
-          remotePath:
-            "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html",
-        },
+        // Dejar que whatsapp-web.js use la versión actual de WhatsApp Web
       });
 
       // Evento: QR Code
@@ -161,9 +157,22 @@ class WhatsAppBot {
     }
 
     // Extraer información del usuario
-    const contact = await msg.getContact();
     const userId = msg.from.replace("@c.us", "");
-    const userName = contact.pushname || contact.name || userId;
+    let userName = userId;
+
+    // Intentar obtener contacto con manejo de errores
+    try {
+      const contact = await msg.getContact();
+      userName = contact.pushname || contact.name || userId;
+    } catch (contactError) {
+      console.log(`[WhatsApp] No se pudo obtener contacto para ${userId}, usando ID como nombre`);
+      // Intentar obtener nombre del chat como alternativa
+      try {
+        userName = chat.name || userId;
+      } catch (e) {
+        // Usar userId como fallback
+      }
+    }
 
     console.log(
       `Mensaje recibido de ${userName} (${userId}): ${messageBody.substring(0, 50)}...`

@@ -161,5 +161,17 @@
     "waitingForName": true,
     "createdAt": "2025-11-13T16:03:52.209Z",
     "updatedAt": "2025-11-13T16:03:52.223Z"
+  },
+  "5213251124659": {
+    "userId": "5213251124659",
+    "waitingForNameAfterInterest": true,
+    "createdAt": "2025-12-03T20:45:51.301Z",
+    "updatedAt": "2025-12-03T20:45:51.321Z"
+  },
+  "5212212121616": {
+    "userId": "5212212121616",
+    "waitingForNameAfterInterest": true,
+    "createdAt": "2025-12-04T17:31:31.736Z",
+    "updatedAt": "2025-12-04T17:31:31.760Z"
   }
 }

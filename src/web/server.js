@@ -1087,24 +1087,22 @@ Rodeado de corredores gastronómicos, rutas de vino y áreas de expansión turí
         }
 
         // Verificar si hay una instancia activa del bot
-        if (!global.whatsappBot || !global.whatsappBot.sock) {
+        if (!global.whatsappBot || !global.whatsappBot.client || !global.whatsappBot.isReady) {
           return res.status(503).json({
             error: "WhatsApp bot not available",
             details: "El bot de WhatsApp no está conectado",
           });
         }
 
-        // Formatear el número de teléfono para WhatsApp (Baileys usa @s.whatsapp.net)
+        // Formatear el número de teléfono para WhatsApp (whatsapp-web.js usa @c.us)
         const formattedPhone = phone.includes("@")
           ? phone
-          : `${phone}@s.whatsapp.net`;
+          : `${phone}@c.us`;
 
         // Enviar mensaje de finalización
         const endMessage =
           "⏰ Tu sesión de conversación ha finalizado. Puedes escribirme nuevamente para iniciar una nueva conversación.";
-        await global.whatsappBot.sock.sendMessage(formattedPhone, {
-          text: endMessage,
-        });
+        await global.whatsappBot.client.sendMessage(formattedPhone, endMessage);
 
         // Registrar el mensaje de finalización en los logs como mensaje del BOT
         logger.log("BOT", endMessage, phone);
@@ -1150,30 +1148,20 @@ Rodeado de corredores gastronómicos, rutas de vino y áreas de expansión turí
         }
 
         // Verificar si hay una instancia activa del bot
-        if (!global.whatsappBot) {
+        if (!global.whatsappBot || !global.whatsappBot.client || !global.whatsappBot.isReady) {
           return res.status(503).json({
             error: "WhatsApp bot not available",
-            details: "La instancia del bot no está disponible",
+            details: "El bot de WhatsApp no está conectado. Por favor, escanee el código QR.",
           });
         }
 
-        if (!global.whatsappBot.sock) {
-          return res.status(503).json({
-            error: "WhatsApp client not connected",
-            details:
-              "El cliente de WhatsApp no está conectado. Por favor, escanee el código QR.",
-          });
-        }
-
-        // Formatear el número de teléfono para WhatsApp (Baileys usa @s.whatsapp.net)
+        // Formatear el número de teléfono para WhatsApp (whatsapp-web.js usa @c.us)
         const formattedPhone = phone.includes("@")
           ? phone
-          : `${phone}@s.whatsapp.net`;
+          : `${phone}@c.us`;
 
         // Enviar mensaje através del cliente de WhatsApp
-        await global.whatsappBot.sock.sendMessage(formattedPhone, {
-          text: message,
-        });
+        await global.whatsappBot.client.sendMessage(formattedPhone, message);
 
         // Registrar el mensaje enviado por el humano con el nombre del usuario
         const senderName = req.user ? req.user.name : "Soporte";
