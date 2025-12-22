@@ -7,6 +7,26 @@ class FollowUpManager {
         this.followUps = new Map(); // Cache local para seguimientos activos
         this.checkInterval = 2 * 60 * 60 * 1000; // 2 horas (revisión en producción)
         this.followUpInterval = 24 * 60 * 60 * 1000; // 24 horas entre seguimientos
+        this.maxFollowUps = 3; // LÍMITE MÁXIMO de mensajes de seguimiento
+
+        // Palabras clave de rechazo para verificación directa (sin depender de IA)
+        this.rejectionKeywords = [
+            'no me interesa', 'no gracias', 'no quiero', 'no es para mi', 'no es para mí',
+            'ya no', 'no estoy interesado', 'no estoy interesada', 'dejen de', 'no me escriban',
+            'no me contacten', 'basta', 'ya estuvo', 'parenle', 'párenle', 'ya les dije',
+            'dejen de molestar', 'no molesten', 'nel', 'nop', 'para nada', 'olvídalo', 'olvidalo',
+            'dejalo', 'déjalo', 'no necesito', 'gracias pero no', 'por el momento no',
+            'ahorita no', 'ahora no', 'después', 'despues', 'luego les marco', 'ya no me interesa',
+            'no me interesa ya', 'ya no quiero', 'cancela', 'cancelar', 'no thanks', 'stop',
+            'ya basta', 'ya parele', 'ya párale', 'suficiente', 'ya fue suficiente'
+        ];
+    }
+
+    // Verificación directa de rechazo sin depender de IA
+    containsRejectionKeyword(message) {
+        if (!message) return false;
+        const lowerMessage = message.toLowerCase().trim();
+        return this.rejectionKeywords.some(keyword => lowerMessage.includes(keyword));
     }
 
     async initialize() {
@@ -119,11 +139,68 @@ class FollowUpManager {
 
                 console.log(`[FollowUp] Usuario ${userId}:`);
                 console.log(`  - Tiempo desde último seguimiento: ${hoursSinceLastFollowUp} horas`);
-                console.log(`  - Contador de seguimientos: ${followUp.followUpCount}`);
+                console.log(`  - Contador de seguimientos: ${followUp.followUpCount}/${this.maxFollowUps}`);
                 console.log(`  - Intervalo requerido: 24 horas`);
 
+                // VERIFICACIÓN 1: Límite máximo de seguimientos alcanzado
+                if (followUp.followUpCount >= this.maxFollowUps) {
+                    console.log(`  - 🛑 LÍMITE MÁXIMO alcanzado (${this.maxFollowUps}), deteniendo seguimiento`);
+                    await this.stopFollowUp(userId, 'limite_maximo_alcanzado');
+                    continue;
+                }
+
                 if (timeSinceLastFollowUp >= this.followUpInterval) {
-                    console.log(`  - ✅ Tiempo cumplido, generando mensaje...`);
+                    console.log(`  - ✅ Tiempo cumplido, verificando estado del cliente antes de enviar...`);
+
+                    // Obtener mensajes del historial
+                    const messages = await sessionManager.getMessages(userId);
+                    const userMessages = messages ? messages.filter(m => m.role === 'user') : [];
+                    const lastUserMessage = userMessages.length > 0 ? userMessages[userMessages.length - 1] : null;
+
+                    // VERIFICACIÓN 2: Verificación directa de palabras clave de rechazo (sin IA)
+                    if (lastUserMessage && lastUserMessage.content) {
+                        if (this.containsRejectionKeyword(lastUserMessage.content)) {
+                            console.log(`  - 🛑 RECHAZO DETECTADO por palabra clave: "${lastUserMessage.content.substring(0, 50)}..."`);
+                            await this.stopFollowUp(userId, 'rechazo_keyword_detectado');
+                            continue;
+                        }
+                    }
+
+                    // VERIFICACIÓN 3: Revisar TODOS los mensajes del usuario por palabras de rechazo
+                    let foundRejection = false;
+                    for (const msg of userMessages) {
+                        if (msg.content && this.containsRejectionKeyword(msg.content)) {
+                            console.log(`  - 🛑 RECHAZO ENCONTRADO en historial: "${msg.content.substring(0, 50)}..."`);
+                            foundRejection = true;
+                            break;
+                        }
+                    }
+                    if (foundRejection) {
+                        await this.stopFollowUp(userId, 'rechazo_en_historial');
+                        continue;
+                    }
+
+                    // VERIFICACIÓN 4: Análisis con IA (si hay mensajes disponibles)
+                    if (lastUserMessage && lastUserMessage.content) {
+                        try {
+                            const status = await aiService.analyzeConversationStatus(messages, lastUserMessage.content);
+                            console.log(`  - 🔍 Estado según IA: ${status}`);
+
+                            if (status === 'RECHAZADO' || status === 'FRUSTRADO' || status === 'ACEPTADO') {
+                                console.log(`  - 🛑 Cliente ${status}, deteniendo seguimiento SIN enviar mensaje`);
+                                await this.stopFollowUp(userId, `ia_${status.toLowerCase()}`);
+                                continue;
+                            }
+                        } catch (aiError) {
+                            console.error(`  - ⚠️ Error en análisis IA, usando verificación por keywords únicamente:`, aiError.message);
+                            // Ya verificamos keywords arriba, así que podemos continuar
+                        }
+                    } else {
+                        console.log(`  - ⚠️ No hay mensajes del usuario en historial, saltando este seguimiento por seguridad`);
+                        continue; // NO enviar si no tenemos historial - mejor seguro que molestar
+                    }
+
+                    console.log(`  - ✅ Cliente aún activo/inactivo, generando mensaje...`);
 
                     // Generar mensaje de seguimiento usando IA
                     const followUpMessage = await this.generateFollowUpMessage(
@@ -135,10 +212,10 @@ class FollowUpManager {
 
                     console.log(`  - 📝 Mensaje generado: "${followUpMessage.substring(0, 50)}..."`);
 
-                    // Enviar mensaje
+                    // Enviar mensaje (usando whatsapp-web.js)
                     if (followUp.chatId && sock) {
                         console.log(`  - 📤 Enviando mensaje a ${followUp.chatId}...`);
-                        await sock.sendMessage(followUp.chatId, { text: followUpMessage });
+                        await sock.sendMessage(followUp.chatId, followUpMessage);
                         await logger.log('BOT', followUpMessage, userId);
 
                         // Actualizar contador y timestamp
@@ -159,6 +236,12 @@ class FollowUpManager {
                         this.followUps.set(userId, followUp);
 
                         console.log(`  - ✅ Mensaje de seguimiento #${followUp.followUpCount} enviado exitosamente`);
+
+                        // Si alcanzó el límite después de este envío, detener
+                        if (followUp.followUpCount >= this.maxFollowUps) {
+                            console.log(`  - 🛑 Límite máximo alcanzado tras envío, deteniendo seguimiento`);
+                            await this.stopFollowUp(userId, 'limite_maximo_tras_envio');
+                        }
                     } else {
                         console.log(`  - ❌ No se pudo enviar: chatId=${followUp.chatId}, sock=${!!sock}`);
                     }
@@ -168,6 +251,7 @@ class FollowUpManager {
                 }
             } catch (error) {
                 console.error(`[FollowUp] ❌ Error procesando seguimiento para ${userId}:`, error);
+                // En caso de error, NO enviar mensaje - mejor seguro
             }
         }
 

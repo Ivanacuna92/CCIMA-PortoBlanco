@@ -41,17 +41,31 @@ class AIService {
         try {
             const analysisPrompt = {
                 role: 'system',
-                content: `Analiza esta conversación y determina si se cumple alguna de estas condiciones:
+                content: `Analiza esta conversación y determina el estado del cliente. Responde ÚNICAMENTE con una palabra.
 
-1. ACEPTADO: El cliente mostró intención clara de proceder (pidió cita, proporcionó correo, confirmó interés explícito, dijo que quiere avanzar)
-2. RECHAZADO: El cliente rechazó explícitamente la oferta (dijo "no me interesa", "no gracias", "no es para mí", "no quiero")
-3. FRUSTRADO: El cliente muestra frustración o enojo (usa lenguaje negativo fuerte, se queja de insistencia, pide que dejen de contactarlo, muestra molestia clara)
-4. ACTIVO: La conversación sigue activa y productiva (hace preguntas, responde con interés, pide información)
-5. INACTIVO: El cliente dejó de responder sin señales claras
+RECHAZADO - El cliente NO quiere continuar. Detecta estas señales:
+- Rechazos directos: "no me interesa", "no gracias", "no quiero", "no es para mí"
+- Peticiones de parar: "ya no me escriban", "dejen de mandarme mensajes", "no me contacten", "basta", "ya estuvo", "párenle"
+- Negativas claras: "no estoy interesado", "ya no", "nel", "nop", "para nada", "olvídalo", "déjalo así"
+- Rechazo educado: "gracias pero no", "por el momento no", "ahorita no puedo", "no es buen momento"
+- Cualquier variación que indique que NO quiere seguir recibiendo información
 
-IMPORTANTE: Sé conservador con FRUSTRADO - solo úsalo si hay señales MUY claras de enojo o molestia explícita.
+FRUSTRADO - El cliente está MOLESTO (solo si hay señales claras de enojo):
+- Quejas de insistencia: "ya les dije que no", "dejen de molestar", "qué necio", "ya me hartaron"
+- Lenguaje agresivo o groserías
+- Amenazas de bloquear o reportar
 
-Responde ÚNICAMENTE con una de estas palabras: ACEPTADO, RECHAZADO, FRUSTRADO, ACTIVO, o INACTIVO`
+ACEPTADO - El cliente quiere PROCEDER:
+- Pide cita, da su correo, confirma interés explícito, quiere avanzar con la compra
+
+ACTIVO - La conversación sigue PRODUCTIVA:
+- Hace preguntas, muestra interés, pide más información
+
+INACTIVO - Sin señales claras (respuestas ambiguas o muy cortas sin contexto)
+
+IMPORTANTE: Ante la DUDA entre RECHAZADO y ACTIVO, prefiere RECHAZADO si hay cualquier indicio de desinterés. Es mejor dejar de contactar a un cliente que podría estar interesado que molestar a uno que no lo está.
+
+Responde ÚNICAMENTE: ACEPTADO, RECHAZADO, FRUSTRADO, ACTIVO o INACTIVO`
             };
 
             const userPrompt = {
@@ -62,10 +76,14 @@ Responde ÚNICAMENTE con una de estas palabras: ACEPTADO, RECHAZADO, FRUSTRADO, 
             const aiMessages = [analysisPrompt, ...messages, userPrompt];
             const response = await this.generateResponse(aiMessages);
 
-            return response.trim().toUpperCase();
+            const status = response.trim().toUpperCase();
+            console.log(`[AnalyzeStatus] Mensaje: "${lastMessage.substring(0, 50)}..." -> Estado: ${status}`);
+
+            return status;
         } catch (error) {
             console.error('Error analizando estado de conversación:', error);
-            return 'ACTIVO'; // Default a activo en caso de error
+            console.log('[AnalyzeStatus] Error en análisis, usando INACTIVO por seguridad');
+            return 'INACTIVO'; // Cambiado: mejor no molestar en caso de error
         }
     }
 

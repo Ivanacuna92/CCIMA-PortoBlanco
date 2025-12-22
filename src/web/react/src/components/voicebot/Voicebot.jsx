@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Phone, Upload, Calendar } from 'lucide-react';
 import voicebotApi from '../../services/voicebotApi';
 import CampaignCreate from './CampaignCreate';
 import CampaignList from './CampaignList';
 import CampaignDetails from './CampaignDetails';
 import AppointmentsList from './AppointmentsList';
+import ActiveCallsFloat from './ActiveCallsFloat';
 
 function Voicebot() {
     const [activeTab, setActiveTab] = useState('campaigns');
@@ -13,11 +14,26 @@ function Voicebot() {
     const [status, setStatus] = useState(null);
     const [loading, setLoading] = useState(true);
 
+    const intervalRef = useRef(null);
+
     useEffect(() => {
         fetchInitialData();
-        const interval = setInterval(fetchStatus, 5000);
-        return () => clearInterval(interval);
-    }, []);
+
+        // Polling dinámico: más rápido si hay llamadas activas
+        const startPolling = () => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+            const pollInterval = status?.activeCallsCount > 0 ? 1000 : 5000;
+            intervalRef.current = setInterval(() => {
+                fetchStatus();
+                fetchCampaigns(); // También actualizar campañas para el progreso
+            }, pollInterval);
+        };
+
+        startPolling();
+        return () => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        };
+    }, [status?.activeCallsCount]);
 
     const fetchInitialData = async () => {
         try {
@@ -98,11 +114,13 @@ function Voicebot() {
                                     {status.asteriskConnected ? 'Asterisk Conectado' : 'Asterisk Desconectado'}
                                 </span>
                             </div>
-                            <div className="bg-blue-100 px-3 py-1 rounded-full">
-                                <span className="text-sm font-semibold text-blue-800">
-                                    {status.activeCallsCount || 0} / {status.maxConcurrentCalls || 2} llamadas activas
-                                </span>
-                            </div>
+                            {status.activeCallsCount > 0 && (
+                                <div className="bg-green-100 px-3 py-1 rounded-full animate-pulse">
+                                    <span className="text-sm font-semibold text-green-800">
+                                        {status.activeCallsCount} llamada{status.activeCallsCount !== 1 ? 's' : ''} en curso
+                                    </span>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -159,6 +177,9 @@ function Voicebot() {
                     <AppointmentsList />
                 )}
             </div>
+
+            {/* Componente flotante de llamadas activas */}
+            <ActiveCallsFloat activeCallsCount={status?.activeCallsCount || 0} />
         </div>
     );
 }

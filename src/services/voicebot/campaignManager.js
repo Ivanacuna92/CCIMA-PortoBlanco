@@ -8,7 +8,6 @@ class CampaignManager extends EventEmitter {
     constructor() {
         super();
         this.activeCampaigns = new Map();
-        this.maxConcurrentCalls = parseInt(process.env.VOICEBOT_CONCURRENT_CALLS) || 2;
         this.activeCallsCount = 0;
         this.callHandlers = new Map();
         this.commonResponses = new Map();
@@ -57,12 +56,12 @@ class CampaignManager extends EventEmitter {
         console.log('[CampaignManager] Pre-generando respuestas comunes...');
 
         for (const [key, text] of Object.entries(responses)) {
-            const pcmPath = `/tmp/common_${key}.pcm`;
+            const mp3Path = `/tmp/common_${key}.mp3`;
             const wavPath = `${soundsPath}/common_${key}.wav`;
 
             try {
-                await openaiVoice.textToSpeech(text, pcmPath);
-                await audioHandler.convertForAsteriskPlaybackDirect(pcmPath, wavPath);
+                await openaiVoice.textToSpeech(text, mp3Path);
+                await audioHandler.convertMP3ForAsterisk(mp3Path, wavPath);
                 this.commonResponses.set(key, `custom/common_${key}`);
                 console.log(`  [OK] ${key}`);
             } catch (e) {
@@ -125,22 +124,30 @@ class CampaignManager extends EventEmitter {
         const campaign = this.activeCampaigns.get(campaignId);
         if (!campaign || campaign.status !== 'running') return;
 
-        // Verificar limite de llamadas concurrentes
-        if (this.activeCallsCount >= this.maxConcurrentCalls) {
-            setTimeout(() => this.processCallQueue(campaignId), 5000);
-            return;
-        }
+        // Obtener TODOS los contactos pendientes de la campaña
+        const pendingContacts = await voicebotDB.getPendingContacts(campaignId, 1000);
 
-        // Obtener siguiente contacto pendiente
-        const pendingContacts = await voicebotDB.getPendingContacts(campaignId, 1);
         if (pendingContacts.length === 0) {
             console.log(`[CampaignManager] Campana ${campaignId} completada - sin contactos pendientes`);
             await this.stopCampaign(campaignId);
             return;
         }
 
-        await this.makeCall(pendingContacts[0]);
-        setTimeout(() => this.processCallQueue(campaignId), 2000);
+        console.log(`[CampaignManager] Iniciando ${pendingContacts.length} llamadas simultaneas para campana ${campaignId}`);
+
+        // Lanzar todas las llamadas simultáneamente
+        for (const contact of pendingContacts) {
+            // Verificar que la campaña siga activa antes de cada llamada
+            const currentCampaign = this.activeCampaigns.get(campaignId);
+            if (!currentCampaign || currentCampaign.status !== 'running') {
+                console.log(`[CampaignManager] Campana ${campaignId} detenida, abortando llamadas restantes`);
+                break;
+            }
+
+            await this.makeCall(contact);
+            // Pequeña pausa entre cada originación para no saturar Asterisk
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
     }
 
     async makeCall(contact) {
@@ -170,6 +177,9 @@ class CampaignManager extends EventEmitter {
             console.error(`[CampaignManager] Error originando llamada: ${error.message}`);
             await voicebotDB.updateContactStatus(contact.id, 'failed');
             this.activeCallsCount--;
+
+            // Verificar si la campaña terminó
+            await this.checkCampaignCompletion(contact.campaign_id);
         }
     }
 
@@ -177,10 +187,16 @@ class CampaignManager extends EventEmitter {
         const handler = this.callHandlers.get(phoneNumber);
         if (!handler) return;
 
+        const campaignId = handler.contact?.campaign_id;
         console.log(`[CampaignManager] Timeout - ${handler.contact.client_name} no contesto`);
         await voicebotDB.updateContactStatus(handler.contact.id, 'no_answer');
         this.callHandlers.delete(phoneNumber);
         this.activeCallsCount--;
+
+        // Verificar si la campaña terminó
+        if (campaignId) {
+            await this.checkCampaignCompletion(campaignId);
+        }
     }
 
     // ========== MANEJO DE LLAMADA CONTESTADA ==========
@@ -226,6 +242,24 @@ class CampaignManager extends EventEmitter {
         await voicebotDB.updateCallStatus(dbCallId, 'completed', new Date());
         this.callHandlers.delete(phoneNumber);
         this.activeCallsCount--;
+
+        // Verificar si la campaña terminó (todas las llamadas completadas)
+        await this.checkCampaignCompletion(contact.campaign_id);
+    }
+
+    async checkCampaignCompletion(campaignId) {
+        const campaign = this.activeCampaigns.get(campaignId);
+        if (!campaign || campaign.status !== 'running') return;
+
+        // Verificar si hay contactos pendientes o llamadas activas para esta campaña
+        const pendingContacts = await voicebotDB.getPendingContacts(campaignId, 1);
+        const activeCallsForCampaign = Array.from(this.callHandlers.values())
+            .filter(h => h.contact?.campaign_id === campaignId).length;
+
+        if (pendingContacts.length === 0 && activeCallsForCampaign === 0) {
+            console.log(`[CampaignManager] Campaña ${campaignId} completada - todas las llamadas finalizadas`);
+            await this.stopCampaign(campaignId);
+        }
     }
 
     // ========== FLUJO DE CONVERSACION ==========
@@ -279,9 +313,9 @@ class CampaignManager extends EventEmitter {
                     break;
                 }
 
-                // GRABAR RESPUESTA DEL CLIENTE
+                // GRABAR RESPUESTA DEL CLIENTE (5 segundos max para respuestas completas)
                 const recordingName = `client_${callId}_${turnCount}`;
-                const recordedPath = await ariManager.recordAudioFromBridge(bridgeId, recordingName, 3);
+                const recordedPath = await ariManager.recordAudioFromBridge(bridgeId, recordingName, 5);
 
                 if (!recordedPath) {
                     console.log('[CampaignManager] No se pudo grabar audio');
@@ -414,12 +448,12 @@ class CampaignManager extends EventEmitter {
     async speakToClient(bridgeId, text, callId, sequence, conversationId) {
         const soundsPath = '/usr/share/asterisk/sounds/custom';
         const filename = `tts_${callId}_${sequence}_${Date.now()}`;
-        const pcmPath = `/tmp/${filename}.pcm`;
+        const mp3Path = `/tmp/${filename}.mp3`;
         const wavPath = `${soundsPath}/${filename}.wav`;
 
         try {
-            await openaiVoice.textToSpeech(text, pcmPath);
-            await audioHandler.convertForAsteriskPlaybackDirect(pcmPath, wavPath);
+            await openaiVoice.textToSpeech(text, mp3Path);
+            await audioHandler.convertMP3ForAsterisk(mp3Path, wavPath);
             await ariManager.playAudio(bridgeId, `custom/${filename}`);
         } catch (error) {
             console.error('[CampaignManager] Error en TTS:', error.message);
@@ -500,11 +534,11 @@ class CampaignManager extends EventEmitter {
         pitchText += `. ¿Te gustaria agendar una visita para conocerlo?`;
 
         const soundsPath = '/usr/share/asterisk/sounds/custom';
-        const pcmPath = `/tmp/pitch_${callId}.pcm`;
+        const mp3Path = `/tmp/pitch_${callId}.mp3`;
         const wavPath = `${soundsPath}/pitch_${callId}.wav`;
 
-        await openaiVoice.textToSpeech(pitchText, pcmPath);
-        await audioHandler.convertForAsteriskPlaybackDirect(pcmPath, wavPath);
+        await openaiVoice.textToSpeech(pitchText, mp3Path);
+        await audioHandler.convertMP3ForAsterisk(mp3Path, wavPath);
 
         return { text: pitchText, path: wavPath };
     }
@@ -575,9 +609,22 @@ class CampaignManager extends EventEmitter {
     }
 
     getStatus() {
+        // Construir lista de llamadas activas con detalles
+        const activeCalls = [];
+        for (const [phoneNumber, handler] of this.callHandlers.entries()) {
+            activeCalls.push({
+                phoneNumber: phoneNumber,
+                clientName: handler.contact?.client_name || 'Desconocido',
+                campaignId: handler.contact?.campaign_id,
+                startTime: handler.startTime,
+                duration: Math.floor((Date.now() - handler.startTime) / 1000),
+                status: handler.answered ? 'in_call' : 'ringing'
+            });
+        }
+
         return {
             activeCallsCount: this.activeCallsCount,
-            maxConcurrentCalls: this.maxConcurrentCalls,
+            activeCalls: activeCalls,
             activeCampaigns: Array.from(this.activeCampaigns.values()),
             commonResponsesLoaded: this.commonResponses.size,
             asteriskConnected: ariManager.isConnected ? ariManager.isConnected() : false

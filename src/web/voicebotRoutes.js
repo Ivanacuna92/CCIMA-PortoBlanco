@@ -363,7 +363,7 @@ router.get('/status', async (req, res) => {
         if (!campaignManager) {
             return res.json({
                 activeCallsCount: 0,
-                maxConcurrentCalls: 2,
+                activeCalls: [],
                 asteriskConnected: false,
                 activeCampaigns: []
             });
@@ -375,7 +375,7 @@ router.get('/status', async (req, res) => {
         console.error('[VoicebotRoutes] Error obteniendo estado:', error);
         res.json({
             activeCallsCount: 0,
-            maxConcurrentCalls: 2,
+            activeCalls: [],
             asteriskConnected: false,
             activeCampaigns: []
         });

@@ -111,7 +111,7 @@ class ARIManager extends EventEmitter {
             name: cleanName,
             format: 'wav',
             maxDurationSeconds: maxDuration,
-            maxSilenceSeconds: 0.8,
+            maxSilenceSeconds: 1.5,  // 1.5s de silencio antes de cortar (permite pausas naturales)
             ifExists: 'overwrite',
             beep: false,
             terminateOn: 'none'

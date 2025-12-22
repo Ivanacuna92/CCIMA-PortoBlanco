@@ -1,15 +1,47 @@
-import { useState, useEffect } from 'react';
-import { ArrowLeft, Play, Pause, Square, Phone, Users, Clock } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { ArrowLeft, Play, Pause, Square, Phone, Users, Clock, RefreshCw } from 'lucide-react';
 import voicebotApi from '../../services/voicebotApi';
 
 function CampaignDetails({ campaign, onBack, onUpdate }) {
     const [stats, setStats] = useState(null);
+    const [currentCampaign, setCurrentCampaign] = useState(campaign);
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState(false);
+    const intervalRef = useRef(null);
 
     useEffect(() => {
         fetchStats();
-    }, [campaign.id]);
+        fetchCampaignData();
+
+        // Polling: cada segundo si está corriendo, cada 5 si no
+        const startPolling = () => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+            const isRunning = currentCampaign.status === 'running';
+            const pollInterval = isRunning ? 1000 : 5000;
+
+            intervalRef.current = setInterval(() => {
+                fetchStats();
+                fetchCampaignData();
+            }, pollInterval);
+        };
+
+        startPolling();
+
+        return () => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        };
+    }, [campaign.id, currentCampaign.status]);
+
+    const fetchCampaignData = async () => {
+        try {
+            const campaignData = await voicebotApi.getCampaign(campaign.id);
+            if (campaignData) {
+                setCurrentCampaign(campaignData);
+            }
+        } catch (error) {
+            console.error('Error cargando campaña:', error);
+        }
+    };
 
     const fetchStats = async () => {
         try {
@@ -24,12 +56,17 @@ function CampaignDetails({ campaign, onBack, onUpdate }) {
 
     const handleStart = async () => {
         setActionLoading(true);
+        // Actualización optimista: cambiar el estado inmediatamente
+        setCurrentCampaign(prev => ({ ...prev, status: 'running' }));
         try {
-            await voicebotApi.startCampaign(campaign.id);
+            await voicebotApi.startCampaign(currentCampaign.id);
             await onUpdate();
             await fetchStats();
+            await fetchCampaignData();
         } catch (error) {
             console.error('Error iniciando campaña:', error);
+            // Revertir si hay error
+            await fetchCampaignData();
             alert(error.response?.data?.error || 'Error iniciando campaña');
         } finally {
             setActionLoading(false);
@@ -38,12 +75,16 @@ function CampaignDetails({ campaign, onBack, onUpdate }) {
 
     const handlePause = async () => {
         setActionLoading(true);
+        // Actualización optimista
+        setCurrentCampaign(prev => ({ ...prev, status: 'paused' }));
         try {
-            await voicebotApi.pauseCampaign(campaign.id);
+            await voicebotApi.pauseCampaign(currentCampaign.id);
             await onUpdate();
             await fetchStats();
+            await fetchCampaignData();
         } catch (error) {
             console.error('Error pausando campaña:', error);
+            await fetchCampaignData();
             alert(error.response?.data?.error || 'Error pausando campaña');
         } finally {
             setActionLoading(false);
@@ -55,7 +96,7 @@ function CampaignDetails({ campaign, onBack, onUpdate }) {
 
         setActionLoading(true);
         try {
-            await voicebotApi.stopCampaign(campaign.id);
+            await voicebotApi.stopCampaign(currentCampaign.id);
             await onUpdate();
             onBack();
         } catch (error) {
@@ -70,8 +111,8 @@ function CampaignDetails({ campaign, onBack, onUpdate }) {
         return <div>Cargando...</div>;
     }
 
-    const progress = stats?.total_contacts_loaded > 0
-        ? Math.round((stats.calls_completed / stats.total_contacts_loaded) * 100)
+    const progress = stats?.total_contacts > 0
+        ? Math.round((stats.calls_completed / stats.total_contacts) * 100)
         : 0;
 
     return (
@@ -86,47 +127,59 @@ function CampaignDetails({ campaign, onBack, onUpdate }) {
                     Volver
                 </button>
 
-                <div className="flex space-x-2">
-                    {campaign.status === 'pending' && (
+                <div className="flex space-x-2 items-center">
+                    {/* Indicador de estado */}
+                    <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                        currentCampaign.status === 'running' ? 'bg-green-100 text-green-800 animate-pulse' :
+                        currentCampaign.status === 'paused' ? 'bg-yellow-100 text-yellow-800' :
+                        currentCampaign.status === 'completed' ? 'bg-gray-100 text-gray-800' :
+                        'bg-blue-100 text-blue-800'
+                    }`}>
+                        {currentCampaign.status === 'running' ? 'En ejecución' :
+                         currentCampaign.status === 'paused' ? 'Pausada' :
+                         currentCampaign.status === 'completed' ? 'Completada' : 'Pendiente'}
+                    </div>
+
+                    {currentCampaign.status === 'pending' && (
                         <button
                             onClick={handleStart}
                             disabled={actionLoading}
-                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center"
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center transition-all"
                         >
-                            <Play className="h-4 w-4 mr-2" />
+                            {actionLoading ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
                             Iniciar Campaña
                         </button>
                     )}
 
-                    {campaign.status === 'running' && (
+                    {currentCampaign.status === 'running' && (
                         <button
                             onClick={handlePause}
                             disabled={actionLoading}
-                            className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 flex items-center"
+                            className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 flex items-center transition-all"
                         >
-                            <Pause className="h-4 w-4 mr-2" />
+                            {actionLoading ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Pause className="h-4 w-4 mr-2" />}
                             Pausar
                         </button>
                     )}
 
-                    {campaign.status === 'paused' && (
+                    {currentCampaign.status === 'paused' && (
                         <button
                             onClick={handleStart}
                             disabled={actionLoading}
-                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center"
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center transition-all"
                         >
-                            <Play className="h-4 w-4 mr-2" />
+                            {actionLoading ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
                             Reanudar
                         </button>
                     )}
 
-                    {(campaign.status === 'running' || campaign.status === 'paused') && (
+                    {(currentCampaign.status === 'running' || currentCampaign.status === 'paused') && (
                         <button
                             onClick={handleStop}
                             disabled={actionLoading}
-                            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center"
+                            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center transition-all"
                         >
-                            <Square className="h-4 w-4 mr-2" />
+                            {actionLoading ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Square className="h-4 w-4 mr-2" />}
                             Detener
                         </button>
                     )}
@@ -135,7 +188,7 @@ function CampaignDetails({ campaign, onBack, onUpdate }) {
 
             {/* Campaign Info */}
             <div className="bg-white rounded-lg shadow p-6 mb-6">
-                <h1 className="text-2xl font-bold text-gray-800 mb-4">{campaign.campaign_name}</h1>
+                <h1 className="text-2xl font-bold text-gray-800 mb-4">{currentCampaign.campaign_name}</h1>
 
                 {/* Progress Bar */}
                 <div className="mb-6">
@@ -158,7 +211,7 @@ function CampaignDetails({ campaign, onBack, onUpdate }) {
                             <Users className="h-5 w-5 text-blue-600 mr-2" />
                             <span className="text-sm text-gray-600">Total Contactos</span>
                         </div>
-                        <p className="text-2xl font-bold text-blue-900">{stats?.total_contacts_loaded || 0}</p>
+                        <p className="text-2xl font-bold text-blue-900">{stats?.total_contacts || 0}</p>
                     </div>
 
                     <div className="bg-green-50 p-4 rounded-lg">

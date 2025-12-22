@@ -238,6 +238,16 @@ class WhatsAppBot {
       await logger.log("bot", response, userId, userName);
     }
 
+    // VERIFICACIÓN RÁPIDA: Detectar rechazo por palabras clave ANTES de usar IA
+    if (await followUpManager.isFollowUpActive(userId)) {
+      if (followUpManager.containsRejectionKeyword(messageBody)) {
+        console.log(`[FollowUp] 🛑 RECHAZO INMEDIATO detectado por keyword para ${userId}: "${messageBody.substring(0, 50)}..."`);
+        await followUpManager.stopFollowUp(userId, "rechazo_inmediato_keyword");
+        this.messageProcessingQueue.delete(messageKey);
+        return; // Salir temprano, no necesitamos análisis de IA
+      }
+    }
+
     // Analizar estado de la conversación después de la respuesta
     const conversationHistory = await sessionManager.getMessages(
       userId,

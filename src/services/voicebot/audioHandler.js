@@ -37,7 +37,11 @@ class AudioHandler {
             wavPath = pcmPath.replace('.pcm', '.wav');
         }
 
-        const command = `sox -t raw -r 24000 -b 16 -c 1 -e signed-integer -L "${pcmPath}" -r 8000 "${wavPath}"`;
+        // Convertir con normalización de volumen y compresión para mejor claridad en llamadas
+        // - norm -0.5: normalizar volumen (máximo sin distorsión)
+        // - compand: compresión dinámica para mantener volumen uniforme
+        // - gain 3: aumentar volumen 3dB adicionales
+        const command = `sox -t raw -r 24000 -b 16 -c 1 -e signed-integer -L "${pcmPath}" -r 8000 "${wavPath}" norm -0.5 compand 0.3,1 6:-70,-60,-20 -5 -90 0.2 gain 3`;
         await execPromise(command);
 
         // Copiar a directorio de sonidos de Asterisk
@@ -69,6 +73,24 @@ class AudioHandler {
         const command = `sox "${inputPath}" -r 8000 -c 1 -b 16 "${outputPath}"`;
         await execPromise(command);
         return outputPath;
+    }
+
+    // Convertir MP3 (Edge TTS) a WAV 8kHz para Asterisk con mejoras de audio
+    async convertMP3ForAsterisk(mp3Path, wavPath = null) {
+        if (!wavPath) {
+            wavPath = mp3Path.replace('.mp3', '.wav');
+        }
+
+        // Convertir con normalización de volumen y compresión para mejor claridad
+        const command = `sox "${mp3Path}" -r 8000 -c 1 -b 16 "${wavPath}" norm -0.5 compand 0.3,1 6:-70,-60,-20 -5 -90 0.2 gain 3`;
+        await execPromise(command);
+
+        // Copiar a directorio de sonidos de Asterisk
+        const filename = path.basename(wavPath);
+        const asteriskPath = `${this.customSoundsPath}/${filename}`;
+        await fs.copyFile(wavPath, asteriskPath);
+
+        return asteriskPath;
     }
 
     // Convertir a formato optimo para Whisper (16kHz mono)

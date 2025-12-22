@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, User, Phone, MapPin, TrendingUp, CheckCircle, XCircle, Clock, RefreshCw, Edit, Trash2 } from 'lucide-react';
+import { Calendar, Phone, MapPin, CheckCircle, Clock, RefreshCw, Edit, Trash2 } from 'lucide-react';
 import voicebotApi from '../../services/voicebotApi';
 
 function AppointmentsList() {
     const [appointments, setAppointments] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [filter, setFilter] = useState('all');
     const [campaigns, setCampaigns] = useState([]);
     const [selectedCampaign, setSelectedCampaign] = useState('all');
     const [editingId, setEditingId] = useState(null);
@@ -128,16 +127,8 @@ function AppointmentsList() {
         }
     };
 
-    const filteredAppointments = appointments.filter(apt => {
-        if (filter === 'all') return true;
-        return apt.interest_level === filter;
-    });
-
     const stats = {
         total: appointments.length,
-        high: appointments.filter(a => a.interest_level === 'high').length,
-        medium: appointments.filter(a => a.interest_level === 'medium').length,
-        low: appointments.filter(a => a.interest_level === 'low').length,
         agreements: appointments.filter(a => a.agreement_reached).length
     };
 
@@ -170,7 +161,7 @@ function AppointmentsList() {
                 </div>
 
                 {/* Stats Grid */}
-                <div className="grid grid-cols-5 gap-4 mb-6">
+                <div className="grid grid-cols-2 gap-4 mb-6 max-w-md">
                     <div className="bg-blue-50 rounded-lg p-4">
                         <div className="flex items-center justify-between">
                             <Calendar className="h-8 w-8 text-blue-600" />
@@ -182,44 +173,17 @@ function AppointmentsList() {
                     </div>
                     <div className="bg-green-50 rounded-lg p-4">
                         <div className="flex items-center justify-between">
-                            <TrendingUp className="h-8 w-8 text-green-600" />
+                            <CheckCircle className="h-8 w-8 text-green-600" />
                             <div className="text-right">
-                                <div className="text-2xl font-bold text-green-600">{stats.high}</div>
-                                <div className="text-xs text-green-600">Alto Interés</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="bg-yellow-50 rounded-lg p-4">
-                        <div className="flex items-center justify-between">
-                            <TrendingUp className="h-8 w-8 text-yellow-600" />
-                            <div className="text-right">
-                                <div className="text-2xl font-bold text-yellow-600">{stats.medium}</div>
-                                <div className="text-xs text-yellow-600">Interés Medio</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-4">
-                        <div className="flex items-center justify-between">
-                            <TrendingUp className="h-8 w-8 text-gray-600" />
-                            <div className="text-right">
-                                <div className="text-2xl font-bold text-gray-600">{stats.low}</div>
-                                <div className="text-xs text-gray-600">Interés Bajo</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="bg-purple-50 rounded-lg p-4">
-                        <div className="flex items-center justify-between">
-                            <CheckCircle className="h-8 w-8 text-purple-600" />
-                            <div className="text-right">
-                                <div className="text-2xl font-bold text-purple-600">{stats.agreements}</div>
-                                <div className="text-xs text-purple-600">Acuerdos</div>
+                                <div className="text-2xl font-bold text-green-600">{stats.agreements}</div>
+                                <div className="text-xs text-green-600">Confirmadas</div>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 {/* Filtros */}
-                <div className="flex items-center space-x-4">
+                <div className="flex items-center">
                     <select
                         value={selectedCampaign}
                         onChange={(e) => setSelectedCampaign(e.target.value)}
@@ -232,67 +196,21 @@ function AppointmentsList() {
                             </option>
                         ))}
                     </select>
-
-                    <div className="flex space-x-2">
-                        <button
-                            onClick={() => setFilter('all')}
-                            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                                filter === 'all'
-                                    ? 'bg-navetec-primary text-white'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                            }`}
-                        >
-                            Todas ({stats.total})
-                        </button>
-                        <button
-                            onClick={() => setFilter('high')}
-                            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                                filter === 'high'
-                                    ? 'bg-green-600 text-white'
-                                    : 'bg-green-100 text-green-600 hover:bg-green-200'
-                            }`}
-                        >
-                            Alto ({stats.high})
-                        </button>
-                        <button
-                            onClick={() => setFilter('medium')}
-                            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                                filter === 'medium'
-                                    ? 'bg-yellow-600 text-white'
-                                    : 'bg-yellow-100 text-yellow-600 hover:bg-yellow-200'
-                            }`}
-                        >
-                            Medio ({stats.medium})
-                        </button>
-                        <button
-                            onClick={() => setFilter('low')}
-                            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                                filter === 'low'
-                                    ? 'bg-gray-600 text-white'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                            }`}
-                        >
-                            Bajo ({stats.low})
-                        </button>
-                    </div>
                 </div>
             </div>
 
             {/* Lista de Citas */}
             <div className="divide-y divide-gray-200">
-                {filteredAppointments.length === 0 ? (
+                {appointments.length === 0 ? (
                     <div className="p-12 text-center">
                         <Calendar className="h-16 w-16 text-gray-300 mx-auto mb-4" />
                         <p className="text-gray-500 text-lg mb-2">No hay citas agendadas</p>
                         <p className="text-gray-400 text-sm">
-                            {filter !== 'all'
-                                ? 'Prueba con otro filtro'
-                                : 'Las citas aparecerán aquí cuando el voicebot complete llamadas exitosas'
-                            }
+                            Las citas aparecerán aquí cuando el voicebot complete llamadas exitosas
                         </p>
                     </div>
                 ) : (
-                    filteredAppointments.map((appointment) => (
+                    appointments.map((appointment) => (
                         <div key={appointment.id} className="p-6 hover:bg-gray-50 transition-colors">
                             {editingId === appointment.id ? (
                                 <div className="bg-white border-2 border-navetec-primary rounded-lg p-4">
